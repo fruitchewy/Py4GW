@@ -616,14 +616,14 @@ class Map:
         """ Skip the cinematic."""
         def _skip_cinematic() -> bool:
             return MapMethods.SkipCinematic()
-        ActionQueueManager().AddAction("ACTION", _skip_cinematic)
+        ActionQueueManager().AddAction("TRANSITION", _skip_cinematic)
 
         
     @staticmethod
     def Travel(map_id: int) -> None:
         """Travel to a map by its ID."""
         def _travel() -> bool:
-            return MapMethods.Travel(map_id)
+            return MapMethods.Travel(map_id, Map.GetRegion()[0], 0, Map.GetLanguage()[0])
         ActionQueueManager().AddAction("ACTION", _travel)
 
 
@@ -1016,8 +1016,6 @@ class Map:
                 offset_x = x - pan_offset_x
                 offset_y = y - pan_offset_y
                 
-                offset_y = -offset_y
-
                 scale_x, scale_y = Map.MissionMap.GetScale()
                 scaled_x = offset_x * scale_x
                 scaled_y = offset_y * scale_y
