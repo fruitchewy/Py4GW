@@ -58,6 +58,12 @@ class RangerTaoVolley_UtilitySkillBar(CustomBehaviorBaseUtility):
         self.fall_back_utility: CustomSkillUtilityBase = FallBackUtility(event_bus=self.event_bus, current_build=in_game_build)
         self.breath_of_the_great_dwarf_utility: CustomSkillUtilityBase = BreathOfTheGreatDwarfUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerHealthGravityDefinition(9))
         self.signet_of_return_utility: CustomSkillUtilityBase = GenericResurrectionUtility(event_bus=self.event_bus, skill=CustomSkill("Signet_of_Return"), current_build=in_game_build,score_definition=ScoreStaticDefinition(12))
+        self.flesh_of_my_flesh_utility: CustomSkillUtilityBase = GenericResurrectionUtility(
+            event_bus=self.event_bus,
+            skill=CustomSkill("Flesh_of_My_Flesh"),
+            current_build=in_game_build,
+            score_definition=ScoreStaticDefinition(12),
+        )
         self.by_urals_hammer_utility: CustomSkillUtilityBase = ByUralsHammerUtility(event_bus=self.event_bus, current_build=in_game_build)
 
     
@@ -80,6 +86,7 @@ class RangerTaoVolley_UtilitySkillBar(CustomBehaviorBaseUtility):
             self.death_blossom_utility,
             self.signet_of_return_utility,
             self.by_urals_hammer_utility,
+            self.flesh_of_my_flesh_utility,
         ]
 
     @property
