@@ -7,7 +7,9 @@ from Widgets.CustomBehaviors.primitives.helpers import custom_behavior_helpers
 from Widgets.CustomBehaviors.primitives.helpers.behavior_result import BehaviorResult
 from Widgets.CustomBehaviors.primitives.helpers.targeting_order import TargetingOrder
 from Widgets.CustomBehaviors.primitives.scores.healing_score import HealingScore
-from Widgets.CustomBehaviors.primitives.scores.score_per_health_gravity_definition import ScorePerHealthGravityDefinition
+from Widgets.CustomBehaviors.primitives.scores.score_per_health_gravity_definition import (
+    ScorePerHealthGravityDefinition,
+)
 from Widgets.CustomBehaviors.primitives.skills.custom_skill import CustomSkill
 from Widgets.CustomBehaviors.primitives.skills.custom_skill_utility_base import CustomSkillUtilityBase
 
@@ -23,7 +25,11 @@ class ImbueHealthUtility(CustomSkillUtilityBase):
         current_build: list[CustomSkill],
         score_definition: ScorePerHealthGravityDefinition = ScorePerHealthGravityDefinition(10),
         mana_required_to_cast: int = 10,
-        allowed_states: list[BehaviorState] = [BehaviorState.IN_AGGRO, BehaviorState.CLOSE_TO_AGGRO, BehaviorState.FAR_FROM_AGGRO],
+        allowed_states: list[BehaviorState] = [
+            BehaviorState.IN_AGGRO,
+            BehaviorState.CLOSE_TO_AGGRO,
+            BehaviorState.FAR_FROM_AGGRO,
+        ],
     ) -> None:
         super().__init__(
             event_bus=event_bus,
@@ -42,12 +48,13 @@ class ImbueHealthUtility(CustomSkillUtilityBase):
         """
         player_agent = GLOBAL_CACHE.Player.GetAgentID()
 
-        targets: list[custom_behavior_helpers.SortableAgentData] = custom_behavior_helpers.Targets.get_all_possible_allies_ordered_by_priority_raw(
-            within_range=Range.Spellcast,
-            condition=lambda agent_id:
-                player_agent != agent_id and
-                (Agent.GetHealth(agent_id) is not None and Agent.GetHealth(agent_id) < 1.0),
-            sort_key=(TargetingOrder.HP_ASC, TargetingOrder.DISTANCE_ASC),
+        targets: list[custom_behavior_helpers.SortableAgentData] = (
+            custom_behavior_helpers.Targets.get_all_possible_allies_ordered_by_priority_raw(
+                within_range=Range.Spellcast,
+                condition=lambda agent_id: player_agent != agent_id
+                and (Agent.GetHealth(agent_id) is not None and Agent.GetHealth(agent_id) < 1.0),
+                sort_key=(TargetingOrder.HP_ASC, TargetingOrder.DISTANCE_ASC),
+            )
         )
         return targets
 
@@ -56,7 +63,6 @@ class ImbueHealthUtility(CustomSkillUtilityBase):
         targets = self._get_targets()
         if len(targets) == 0:
             return None
-            
 
         top = targets[0]
         if top.hp < 0.40:
@@ -76,5 +82,7 @@ class ImbueHealthUtility(CustomSkillUtilityBase):
             return BehaviorResult.ACTION_SKIPPED
 
         target = targets[0]
-        result = yield from custom_behavior_helpers.Actions.cast_skill_to_target(self.custom_skill, target_agent_id=target.agent_id)
+        result = yield from custom_behavior_helpers.Actions.cast_skill_to_target(
+            self.custom_skill, target_agent_id=target.agent_id
+        )
         return result
