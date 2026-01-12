@@ -11,6 +11,7 @@ from Widgets.CustomBehaviors.primitives.scores.score_static_definition import Sc
 from Widgets.CustomBehaviors.primitives.skillbars.custom_behavior_base_utility import CustomBehaviorBaseUtility
 from Widgets.CustomBehaviors.primitives.skills.custom_skill import CustomSkill
 from Widgets.CustomBehaviors.primitives.skills.custom_skill_utility_base import CustomSkillUtilityBase
+from Widgets.CustomBehaviors.skills.common.by_urals_hammer_utility import ByUralsHammerUtility
 from Widgets.CustomBehaviors.skills.generic.keep_self_effect_up_utility import KeepSelfEffectUpUtility
 from Widgets.CustomBehaviors.skills.common.breath_of_the_great_dwarf_utility import BreathOfTheGreatDwarfUtility
 from Widgets.CustomBehaviors.skills.common.ebon_battle_standard_of_honor_utility import EbonBattleStandardOfHonorUtility
@@ -85,6 +86,8 @@ class DervishVor_UtilitySkillBar(CustomBehaviorBaseUtility):
             current_build=in_game_build,
             mana_required_to_cast=15,
         )
+        self.by_urals_hammer_utility: CustomSkillUtilityBase = ByUralsHammerUtility(event_bus=self.event_bus, current_build=in_game_build)
+
 
     @property
     @override
@@ -93,7 +96,7 @@ class DervishVor_UtilitySkillBar(CustomBehaviorBaseUtility):
 
     @property
     @override
-    def skills_allowed_in_behavior(self) -> list[CustomSkillUtilityBase]:
+    def custom_skills_in_behavior(self) -> list[CustomSkillUtilityBase]:
         return [
             self.vow_of_revolution_utility,
             self.imbue_health_utility,
@@ -106,6 +109,7 @@ class DervishVor_UtilitySkillBar(CustomBehaviorBaseUtility):
             self.ebon_battle_standard_of_honor_utility,
             self.ebon_vanguard_assassin_support,
             self.flesh_of_my_flesh_utility,
+            self.by_urals_hammer_utility,
         ]
 
     @property

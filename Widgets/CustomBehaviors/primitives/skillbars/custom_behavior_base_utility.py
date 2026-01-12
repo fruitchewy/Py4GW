@@ -221,7 +221,7 @@ class CustomBehaviorBaseUtility():
             return self.__final_skills_list
         
         in_game_build_by_skill_id: dict[int, CustomSkill] = self.skillbar_management.get_in_game_build()
-        custom_skills_in_behavior_by_skill_id: dict[int, CustomSkillUtilityBase] = {x.custom_skill.skill_id: x for x in self.custom_skills_in_behavior}
+        custom_skills_in_behavior_by_skill_id: dict[int, CustomSkillUtilityBase] = {x.custom_skill.skill_id: x for x in self.custom_skills_in_behavior if self.custom_skills_in_behavior is not None}
         generic_utility_skills_by_skill_id: dict[int, CustomSkillUtilityBase] = utility_skill_finder.discover_all_utility_skills(
             event_bus=self.event_bus,
             in_game_build=list(in_game_build_by_skill_id.values())

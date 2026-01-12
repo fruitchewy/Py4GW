@@ -60,15 +60,35 @@ class ImbueHealthUtility(CustomSkillUtilityBase):
 
     @override
     def _evaluate(self, current_state: BehaviorState, previously_attempted_skills: list[CustomSkill]) -> float | None:
+        player_agent = GLOBAL_CACHE.Player.GetAgentID()
+        player_hp = min(Agent.GetHealth(player_agent), 300)
+
+        # Get Mysticism attribute level (ID 44)
+        attributes = Agent.GetAttributesDict(player_agent)
+        mysticism_level = attributes.get(44, 0)
+        
+        # Calculate health sacrifice ratio based on user formula: .05 + (mysticism * 3)
+        # Interpreted as a percentage value (e.g. 36.05%), so divided by 100.
+        health_percentage_scaling = 0.05 + (mysticism_level * .03)
+        total_heal = player_hp * health_percentage_scaling
+        
+        # Calculate efficiency ratio based on a standard 150 HP heal
+        efficiency_ratio = total_heal / 150.0
+
         targets = self._get_targets()
         if len(targets) == 0:
             return None
 
         top = targets[0]
+        base_score = 0.0
+        
         if top.hp < 0.40:
-            return self.score_definition.get_score(HealingScore.MEMBER_DAMAGED_EMERGENCY)
-        if top.hp < 0.85:
-            return self.score_definition.get_score(HealingScore.MEMBER_DAMAGED)
+            base_score = self.score_definition.get_score(HealingScore.MEMBER_DAMAGED_EMERGENCY)
+        elif top.hp < 0.85:
+            base_score = self.score_definition.get_score(HealingScore.MEMBER_DAMAGED)
+        
+        if base_score > 0:
+            return base_score * efficiency_ratio
 
         return None
 

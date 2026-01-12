@@ -8,6 +8,8 @@ from Widgets.CustomBehaviors.primitives.helpers.behavior_result import BehaviorR
 from Widgets.CustomBehaviors.primitives.helpers.targeting_order import TargetingOrder
 from Widgets.CustomBehaviors.primitives.scores.score_per_agent_quantity_definition import ScorePerAgentQuantityDefinition
 from Widgets.CustomBehaviors.primitives.scores.score_static_definition import ScoreStaticDefinition
+from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_multiple_target import CustomBuffMultipleTarget
+from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_target_per_profession import BuffConfigurationPerProfession
 from Widgets.CustomBehaviors.primitives.skills.custom_skill import CustomSkill
 from Widgets.CustomBehaviors.primitives.skills.custom_skill_utility_base import CustomSkillUtilityBase
 from Widgets.CustomBehaviors.primitives import constants
@@ -31,7 +33,7 @@ class TogetherAsOneUtility(CustomSkillUtilityBase):
             allowed_states=allowed_states)
                 
         self.score_definition: ScoreStaticDefinition = score_definition
-
+        self.buff_configuration: CustomBuffMultipleTarget = CustomBuffMultipleTarget(event_bus, self.custom_skill, buff_configuration_per_profession= BuffConfigurationPerProfession.BUFF_CONFIGURATION_ALL)
     @override
     def _evaluate(self, current_state: BehaviorState, previously_attempted_skills: list[CustomSkill]) -> float | None:
 
@@ -41,13 +43,21 @@ class TogetherAsOneUtility(CustomSkillUtilityBase):
     def _execute(self, state: BehaviorState) -> Generator[Any, None, BehaviorResult]:
 
         if state is BehaviorState.IN_AGGRO:
-            agent_array = AgentArray.GetAllyArray()
-            agent_array = AgentArray.Filter.ByCondition(agent_array, lambda agent_id: Agent.IsAlive(agent_id))
-            agent_array = AgentArray.Filter.ByCondition(agent_array, lambda agent_id: agent_id != GLOBAL_CACHE.Player.GetAgentID())
+            # alive non-self allies
+            agent_array = AgentArray.Filter.ByCondition(AgentArray.GetAllyArray(), lambda agent_id: Agent.IsAlive(agent_id) and agent_id != GLOBAL_CACHE.Player.GetAgentID())
+            # within Spellcast range
             agent_array = AgentArray.Filter.ByDistance(agent_array, GLOBAL_CACHE.Player.GetXY(), Range.Spellcast.value)
+            pet = GLOBAL_CACHE.Party.Pets.GetPetInfo(owner_id=GLOBAL_CACHE.Player.GetAgentID()).agent_id
+            # that aren't already near our pet
+            if Agent.IsAlive(pet):
+                agent_array = AgentArray.Filter.ByDistance(agent_array, Agent.GetXY(pet), Range.Area.value, negate=True)
+            # and match our configuration
+            agent_array = AgentArray.Filter.ByCondition(agent_array, lambda agent_id: self.buff_configuration.get_agent_id_predicate()(agent_id))
+
 
             agent_ids: list[int] = [agent_id for agent_id in agent_array]
 
+            
             gravity_center: custom_behavior_helpers.GravityCenter | None = custom_behavior_helpers.Targets.find_optimal_gravity_center(Range.Area, agent_ids=agent_ids)
             if gravity_center is not None:
                 if gravity_center.distance_from_player < Range.Area.value: # else it doesn't worth moving, we are too far
@@ -65,3 +75,7 @@ class TogetherAsOneUtility(CustomSkillUtilityBase):
         
         result = yield from custom_behavior_helpers.Actions.cast_skill(self.custom_skill)
         return result
+    
+    @override
+    def get_buff_configuration(self) -> CustomBuffMultipleTarget | None:
+        return self.buff_configuration
