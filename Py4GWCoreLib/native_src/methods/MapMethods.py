@@ -19,6 +19,7 @@ SkipCinematic_Func = NativeFunction(
 )
 
 class MapMethods:
+    _GHKEY_SCRATCH = GHKey()
     @staticmethod
     def SkipCinematic() -> bool:
         """Skip the current map cinematic."""
@@ -29,29 +30,49 @@ class MapMethods:
         return True
 
     @staticmethod
-    def Travel(map_id: int, region: int =0, district_number: int =0, language: int =0) -> bool:
-        return UIManager.SendUIMessage(
+    def Travel(map_id: int, region: int = 0, district_number: int = 0, language: int = 0) -> bool:
+        class TravelStruct(ctypes.Structure):
+            _fields_ = [
+                ("map_id", ctypes.c_uint32),  # GW::Constants::MapID
+                ("region", ctypes.c_int32),  # ServerRegion
+                ("language", ctypes.c_int32),  # Language
+                ("district_number", ctypes.c_int32),
+            ]
+
+        return UIManager.SendUIMessageRaw(
             UIMessage.kTravel,
-            [map_id, region, language, district_number],
-            False
+            ctypes.addressof(TravelStruct(map_id=map_id, region=region, language=language, district_number=district_number)),
+            False,
         )
 
     @staticmethod
     def TravelGH(key: GHKey | None = None) -> bool:
-        """Travel to a Guild Hall using the specified GHKey."""
-        if key is None:
-            guild_ctx = GuildContext.get_context()
-            if guild_ctx is None:
-                return False
-            key = guild_ctx.player_gh_key
-                    
+        """
+        Travel to a Guild Hall.
+        If a key is provided, its value is written into the existing
+        player_gh_key before sending the UI message.
+        """
+        guild_ctx = GuildContext.get_context()
+        if guild_ctx is None:
+            return False
+
+        gh_key = guild_ctx.player_gh_key
+        if gh_key is None:
+            return False
+
+        # If a custom key was provided, stuff its value into the real GH key
+        if key is not None:
+            for i in range(4):
+                gh_key.key_data[i] = key.key_data[i]
+
+        # Always use the original, working pointer
         return UIManager.SendUIMessageRaw(
             UIMessage.kGuildHall,
-            ctypes.addressof(key),
+            ctypes.addressof(gh_key),
             0,
             False
         )
-        
+
     @staticmethod
     def LeaveGH() -> bool:
         """Leave the current Guild Hall."""

@@ -271,12 +271,12 @@ class HeroAI_FloatingWindows():
                         continue
                     
                     if not HeroAI_FloatingWindows.settings.CombinePanels:
-                        email = account.AccountEmail.lower()
+                        email = account.AccountEmail
                         
                         if not email in HeroAI_FloatingWindows.hero_windows:
                             ConsoleLog("HeroAI", f"Creating Hero Panel for account: {email}")
                             
-                            info = HeroAI_FloatingWindows.settings.HeroPanelPositions.get(email, Settings.HeroPanelInfo())
+                            info = HeroAI_FloatingWindows.settings.HeroPanelPositions.get(email, HeroAI_FloatingWindows.settings.HeroPanelPositions.get(email.lower(), Settings.HeroPanelInfo()))
                             HeroAI_FloatingWindows.hero_windows[email] = WindowModule(
                                 module_name=f"HeroAI - {email}",
                                 window_name=f"##HeroAI - {email}",
@@ -501,7 +501,7 @@ class HeroAI_Windows():
                         PyImGui.text_colored(f"IsReadyToCast: {is_ready_to_cast}", Utils.TrueFalseColor(is_ready_to_cast))
                         if PyImGui.tree_node(f"IsReadyToCast: {is_ready_to_cast}"): 
                             is_casting = Agent.IsCasting(GLOBAL_CACHE.Player.GetAgentID())
-                            casting_skill = Agent.GetCastingSkill(GLOBAL_CACHE.Player.GetAgentID())
+                            casting_skill = Agent.GetCastingSkillID(GLOBAL_CACHE.Player.GetAgentID())
                             skillbar_casting = GLOBAL_CACHE.SkillBar.GetCasting()
                             skillbar_recharge = cached_data.combat_handler.skills[HeroAI_Windows.skill_slot].skillbar_data.recharge
                             player_agent_id = GLOBAL_CACHE.Player.GetAgentID()

@@ -4,10 +4,19 @@ from dataclasses import dataclass
 from Py4GWCoreLib.py4gwcorelib_src.Color import ColorPalette, Color
 from Py4GWCoreLib.UIManager import FrameInfo, UIManager
 
-VIEW_LIST = [
-    "Map",
-    "Agents",
+VIEW_LIST: list[tuple[bool, str]] = [
+    #is_child, "View Name"
+    (False, "Map"),
+    (True,  "Mission Map"),
+    (True,  "Mini Map"),
+    (True,  "World Map"),
+    (True,  "Pregame Data"),
+    (True,  "WIP Observing Matches Data"),
+    (True,  "Geo Location and Pathing"),
+    (False, "AgentArray"),
+    (False, "Agents"),
 ]
+
 
 SECTION_INFO = {
     "Map": {
@@ -26,7 +35,7 @@ SECTION_INFO = {
             "- World Map.\n"
             "- Pregame Data.\n"
             "- Observing Matches Data.(WIP)\n"
-            "- Geo Location and Pathing.(WIP)\n"    
+            "- Geo Location and Pathing.\n"    
         ),
     },
 }

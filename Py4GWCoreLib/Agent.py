@@ -313,7 +313,7 @@ class Agent:
         return pos.x, pos.y, z
 
     @staticmethod
-    def GetZPlane(agent_id : int) -> float:
+    def GetZPlane(agent_id : int) -> int:
         """
         Purpose: Retrieve the Z plane of an agent.
         Args: agent_id (int): The ID of the agent.
@@ -321,7 +321,7 @@ class Agent:
         """
         agent = Agent.GetAgentByID(agent_id)
         if agent is None:
-            return 0.0
+            return 0
         pos = agent.pos
         return pos.zplane
     
@@ -935,6 +935,18 @@ class Agent:
         if living is None:
             return False
         return living.is_casting
+    
+    @staticmethod
+    def GetCastingSkillID(agent_id: int) -> int:
+        """ Purpose: Retrieve the casting skill of the agent."""
+        if not Agent.IsCasting(agent_id):
+            return 0    
+        
+        living = Agent.GetLivingAgentByID(agent_id)
+        if living is None:
+            return 0
+        return living.skill
+
 
     @staticmethod
     def IsIdle(agent_id: int) -> bool:
@@ -1243,35 +1255,6 @@ class Agent:
         Returns: tuple
         """
 
-        def safe_int(value):
-            """
-            Safely convert a value to an integer.
-            Returns 0 if the value is not a valid integer.
-            """
-            if isinstance(value, int):
-                return value  # Already an integer
-            if isinstance(value, str) and value.isdigit():
-                return int(value)  # Convert valid string integers like '15'
-            try:
-                # Attempt to extract the first valid integer if possible
-                return int(value.split()[0]) if isinstance(value, str) else 0
-            except (ValueError, AttributeError):
-                return 0  # Default to 0 for any invalid cases
-
-        agent_instance = Agent.agent_instance(agent_id)
-        model_id = agent_instance.living_agent.player_number
-        attribute_list = []
-        if model_id in ModelData:
-            attributes = ModelData[model_id].get('attributes', [])
-            for attribute in attributes:
-                level = safe_int(attribute.get('level', 0))
-
-                name = attribute.get('name', 'N/A')
-                attribute_instance = PyAgent.AttributeClass(name, level)
-                if attribute_instance.GetName() != "None":
-                    attribute_list.append(attribute_instance)
-            return attribute_list
-
         agent = Agent.agent_instance(agent_id)
         return agent.attributes
     
@@ -1291,13 +1274,7 @@ class Agent:
                 
         return attributes
 
-    @staticmethod
-    def GetCastingSkill(agent_id: int) -> int:
-        """ Purpose: Retrieve the casting skill of the agent."""
-        if not Agent.agent_instance(agent_id).living_agent.is_casting:
-            return 0    
-        return Agent.agent_instance(agent_id).living_agent.casting_skill_id
-
+    
 
 
 

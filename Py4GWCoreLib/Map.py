@@ -1,6 +1,7 @@
 
 from .Context import GWContext
 from .native_src.methods.MapMethods import MapMethods
+from .native_src.context.MapContext import PathingMapStruct, PathingTrapezoidStruct
 from .enums_src.Region_enums import (ServerRegionName, ServerLanguageName, RegionTypeName, 
                                      ContinentName, CampaignName,)
 
@@ -616,14 +617,14 @@ class Map:
         """ Skip the cinematic."""
         def _skip_cinematic() -> bool:
             return MapMethods.SkipCinematic()
-        ActionQueueManager().AddAction("ACTION", _skip_cinematic)
+        ActionQueueManager().AddAction("TRANSITION", _skip_cinematic)
 
         
     @staticmethod
     def Travel(map_id: int) -> None:
         """Travel to a map by its ID."""
         def _travel() -> bool:
-            return MapMethods.Travel(map_id)
+            return MapMethods.Travel(map_id, Map.GetRegion()[0], 0, Map.GetLanguage()[0])
         ActionQueueManager().AddAction("ACTION", _travel)
 
 
@@ -902,9 +903,10 @@ class Map:
         @staticmethod
         def GetCenter() -> tuple[float, float]:
             """Get the player position coordinates of the mission map."""
-            if not (misison_map_ctx := GWContext.MissionMap.GetContext()):
-                return 0.0, 0.0
-            return misison_map_ctx.player_mission_map_pos.to_tuple()
+            dimensions = Map.MissionMap.GetMissionMapContentsCoords()
+            center_x = dimensions[0] + (dimensions[2] - dimensions[0]) / 2.0
+            center_y = dimensions[1] + (dimensions[3] - dimensions[1]) / 2.0
+            return center_x,  center_y
         
         
         
@@ -1016,8 +1018,6 @@ class Map:
                 offset_x = x - pan_offset_x
                 offset_y = y - pan_offset_y
                 
-                offset_y = -offset_y
-
                 scale_x, scale_y = Map.MissionMap.GetScale()
                 scaled_x = offset_x * scale_x
                 scaled_y = offset_y * scale_y
@@ -1908,8 +1908,11 @@ class Map:
     #region Pathing
     class Pathing:
         @staticmethod
-        def GetPathingMaps() -> List[PyPathing.PathingMap]:
-            return PyPathing.get_pathing_maps()
+        def GetPathingMaps() -> List[PathingMapStruct]:
+            if (map_ctx := GWContext.Map.GetContext()) is None:
+                return []
+            
+            return map_ctx.pathing_maps
 
         @staticmethod
         def WorldToScreen(x: float, y: float, z: float = 0.0) -> tuple[float, float]:
@@ -1920,7 +1923,7 @@ class Map:
             return screen_pos.x, screen_pos.y
 
         class Quad:
-            def __init__(self, trapezoid: PyPathing.PathingTrapezoid):
+            def __init__(self, trapezoid: PathingTrapezoidStruct):
                 self.trapezoid = trapezoid
 
                 self.top_left: PyOverlay.Point2D = PyOverlay.Point2D(int(trapezoid.XTL), int(trapezoid.YT))

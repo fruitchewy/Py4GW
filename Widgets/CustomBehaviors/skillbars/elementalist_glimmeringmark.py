@@ -89,7 +89,7 @@ class ElementalistGlimmeringMark_UtilitySkillBar(CustomBehaviorBaseUtility):
         self.intensity_prep_utility: CustomSkillUtilityBase = PreparationUtility(
              event_bus=self.event_bus,
              prep_skill=CustomSkill("Intensity"),
-             target_utilities=[self.chain_lightning_utility],
+             target_utilities=[self.chain_lightning_utility, self.shell_shock_utility],
              current_build=in_game_build,
              score_definition=ScoreStaticDefinition(68),
              mana_required_to_cast=0,
@@ -122,21 +122,15 @@ class ElementalistGlimmeringMark_UtilitySkillBar(CustomBehaviorBaseUtility):
             current_build=in_game_build,
             score_definition=ScoreStaticDefinition(70),
             mana_required_to_cast=10,
+            renew_before_expiration_in_milliseconds=1000,
             allowed_states=[BehaviorState.IN_AGGRO, BehaviorState.CLOSE_TO_AGGRO, BehaviorState.FAR_FROM_AGGRO]
         )
-
-
 
         self.fall_back_utility: CustomSkillUtilityBase = FallBackUtility(event_bus=self.event_bus, current_build=in_game_build)
 
     @property
     @override
-    def complete_build_with_generic_skills(self) -> bool:
-        return False
-
-    @property
-    @override
-    def skills_allowed_in_behavior(self) -> list[CustomSkillUtilityBase]:
+    def custom_skills_in_behavior(self) -> list[CustomSkillUtilityBase]:
         return [
             self.fall_back_utility,
             self.arcane_echo_utility,
@@ -155,5 +149,4 @@ class ElementalistGlimmeringMark_UtilitySkillBar(CustomBehaviorBaseUtility):
     def skills_required_in_behavior(self) -> list[CustomSkill]:
         return [
             self.glimmering_mark_utility.custom_skill,
-            self.chain_lightning_utility.custom_skill,
         ]

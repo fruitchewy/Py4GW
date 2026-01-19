@@ -39,11 +39,10 @@ class PowerDrainUtility(CustomSkillUtilityBase):
             skill=self.custom_skill,
             select_target=lambda: custom_behavior_helpers.Targets.get_first_or_default_from_enemy_ordered_by_priority(
                 within_range=Range.Spellcast,
-                condition=lambda agent_id: Agent.IsCasting(agent_id) and 
-                GLOBAL_CACHE.Skill.Flags.IsSpell(Agent.GetCastingSkill(agent_id)) and 
-                GLOBAL_CACHE.Skill.Data.GetActivation(Agent.GetCastingSkill(agent_id)) >= 0.250,
-                sort_key=(TargetingOrder.AGENT_QUANTITY_WITHIN_RANGE_DESC, TargetingOrder.CASTER_THEN_MELEE),
-                range_to_count_enemies=GLOBAL_CACHE.Skill.Data.GetAoERange(self.custom_skill.skill_id))
+                condition=lambda agent_id: Agent.IsCasting(agent_id) and
+                GLOBAL_CACHE.Skill.Flags.IsSpell(Agent.GetCastingSkillID(agent_id)) and
+                GLOBAL_CACHE.Skill.Data.GetActivation(Agent.GetCastingSkillID(agent_id)) >= 0.250,
+                sort_key=(TargetingOrder.CASTER_THEN_MELEE,))
         ))
 
         result: BehaviorResult = yield from custom_behavior_helpers.Helpers.wait_for_or_until_completion(500, action)
