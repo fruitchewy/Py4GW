@@ -403,12 +403,13 @@ class Yield:
             timeout: int = -1,
             progress_callback: Optional[Callable[[float], None]] = None,
             custom_pause_fn: Optional[Callable[[], bool]] = None,
-            stop_on_party_wipe: bool = True
+            stop_on_party_wipe: bool = True,
+            skip_ahead_after_pause: bool = False,
+            max_skip_ahead_distance: float = 5000.0
         ):
             import random
             from .Checks import Checks
-        
-            log = True #force logging
+            #log = True #force logging
             detailed_log = False #always detailed log for now
             
             total_points = len(path_points)
@@ -420,9 +421,11 @@ class Yield:
             ConsoleLog("FollowPath", f"Starting path with {total_points} points.", Console.MessageType.Info, log=log)
 
 
-            for idx, (target_x, target_y) in enumerate(path_points):
+            idx = 0
+            while idx < total_points:
+                target_x, target_y = path_points[idx]
                 start_time = Utils.GetBaseTimestamp()
-                
+
                 ConsoleLog("FollowPath", f"Starting point {idx+1}/{total_points} - ({target_x}, {target_y})", Console.MessageType.Info, log=detailed_log)
 
 
@@ -468,7 +471,6 @@ class Yield:
                         ActionQueueManager().ResetAllQueues()
                         return False
 
-
                     if Agent.IsValid(Player.GetAgentID()) and Agent.IsCasting(Player.GetAgentID()):
                         ConsoleLog("FollowPath", "Player casting detected, waiting 750ms...", Console.MessageType.Debug, log=detailed_log)
                 
@@ -486,9 +488,38 @@ class Yield:
                             ConsoleLog("FollowPath", "Custom pause condition active, pausing movement...", Console.MessageType.Debug, log=log)
                             start_time = Utils.GetBaseTimestamp()  # Reset timeout timer
                             yield from Yield.wait(750)
-                    
+
                     if not Checks.Map.MapValid(): ActionQueueManager().ResetAllQueues(); return False
-                    
+
+                    # After resuming from pause, find the closest upcoming waypoint within max distance
+                    if skip_ahead_after_pause:
+                        current_x, current_y = Player.GetXY()
+                        cumulative_path_distance = 0.0
+                        best_idx = idx
+                        best_distance = float('inf')
+
+                        # Iterate through upcoming points, calculating cumulative distance along path
+                        for future_idx in range(idx, total_points):
+                            fx, fy = path_points[future_idx]
+
+                            if future_idx > idx:
+                                prev_x, prev_y = path_points[future_idx - 1]
+                                segment_length = Utils.Distance((prev_x, prev_y), (fx, fy))
+                                cumulative_path_distance += segment_length
+
+                                if cumulative_path_distance > max_skip_ahead_distance:
+                                    break
+
+                            dist_to_point = Utils.Distance((current_x, current_y), (fx, fy))
+                            if dist_to_point < best_distance:
+                                best_distance = dist_to_point
+                                best_idx = future_idx
+
+                        if best_idx > idx:
+                            ConsoleLog("FollowPath", f"After pause, skipping from point {idx+1} to {best_idx+1} (closest at {best_distance:.0f} units)", Console.MessageType.Info, log=log)
+                            idx = best_idx - 1
+                            break
+
                     current_time = Utils.GetBaseTimestamp()
                     delta = current_time - start_time
                     if delta > timeout and timeout > 0:
@@ -523,6 +554,7 @@ class Yield:
                                 # Backwards
                                 yield from Yield.Movement.WalkBackwards(1000)
                                 if not Checks.Map.MapValid(): ActionQueueManager().ResetAllQueues(); return False
+
                                 # Strafe left
                                 yield from Yield.Movement.StrafeLeft(1000)
                                 if not Checks.Map.MapValid(): ActionQueueManager().ResetAllQueues(); return False
@@ -557,6 +589,7 @@ class Yield:
                     progress_callback((idx + 1) / total_points)
                     ConsoleLog("FollowPath", f"Progress callback: {((idx + 1) / total_points) * 100:.1f}% done.", Console.MessageType.Debug, log=detailed_log)
 
+                idx += 1
 
             ConsoleLog("FollowPath", "Path traversal completed successfully.", Console.MessageType.Success, log=log)
             return True
@@ -2092,7 +2125,7 @@ class Yield:
                 ConsoleLog("Reroll", "Failed to retrieve pregame context.", Console.MessageType.Error, log)
                 yield from Yield.wait(100)
                 return False
-            
+
             character_index = pregame.chars_list.index(character_name_to_delete) if character_name_to_delete in pregame.chars_list else -1
             last_known_index = pregame.chosen_character_index
             
@@ -2294,6 +2327,7 @@ class Yield:
                 ConsoleLog("Reroll", "Failed to retrieve pregame context.", Console.MessageType.Error, log)
                 yield from Yield.wait(100)
                 return
+
             character_index = pregame.chars_list.index(target_character_name) if target_character_name in pregame.chars_list else -1
             last_known_index = pregame.chosen_character_index
             
