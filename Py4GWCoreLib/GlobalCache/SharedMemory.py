@@ -1013,13 +1013,13 @@ class Py4GWSharedMemoryManager:
             self.party_instance.GetContext()
 
             
-            title_array = Player.GetTitleArray()
-            for title_id in title_array:
-                if title_id in self._title_instances:
-                    continue
-                title = Player.GetTitle(title_id)
-                if title:
-                    self._title_instances[title_id] = title
+            # title_array = Player.GetTitleArray()
+            # for title_id in title_array:
+            #     if title_id in self._title_instances:
+            #         continue
+            #     title = Player.GetTitle(title_id)
+            #     if title:
+            #         self._title_instances[title_id] = title
                     
                     
         

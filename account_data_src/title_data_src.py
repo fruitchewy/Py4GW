@@ -51,12 +51,12 @@ class TitleData:
 
 
 
-    def _draw_title(self, title: TitleStruct, managed: bool):
-        title_name = TITLE_NAME.get(title.title_id, f"Unknown ({title.title_id})")
+    def _draw_title(self, title: TitleStruct, title_id: int, managed: bool):
+        title_name = TITLE_NAME.get(title_id, f"Unknown ({title_id})")
 
         if not managed:
             PyImGui.text(f"{title_name}")
-            PyImGui.text(f"Title ID: {title.title_id}")
+            PyImGui.text(f"Title ID: {title_id}")
             PyImGui.text(f"Current Points: {title.current_points}")
             PyImGui.text(f"Has Tiers: {title.has_tiers}")
             PyImGui.text(f"Is Percentage Based: {title.is_percentage_based}")
@@ -68,8 +68,8 @@ class TitleData:
             return
 
         # Get tier info
-        current_tier, next_tier = self.get_current_tier(title.title_id, title.current_points)
-        tiers = TITLE_TIERS.get(title.title_id, [])
+        current_tier, next_tier = self.get_current_tier(title_id, title.current_points)
+        tiers = TITLE_TIERS.get(title_id, [])
         avail_width = PyImGui.get_content_region_avail()[0]
 
         # -------- Determine start/end range --------
@@ -116,22 +116,21 @@ class TitleData:
             PyImGui.separator()
 
         # distribute titles by category or unmanaged
-        for title in self.titles.values():
+        for title_id, title in self.titles.items():
             found_category = None
             for cat, ids in TITLE_CATEGORIES.items():
-                if title.title_id in ids:
-                    categorized_titles[cat].append(title)
+                if title_id in ids:
+                    categorized_titles[cat].append((title_id,title))
                     found_category = cat
                     break
             if not found_category:
                 unmanaged_titles.append(title)
 
         # draw each category group
-        for category, titles in categorized_titles.items():
-            if not titles:
+        for category in categorized_titles:
+            if not categorized_titles[category]:
                 continue
-            titles.sort(key=lambda t: self._get_total_completion_ratio(t), reverse=True)
 
             if PyImGui.collapsing_header(category, PyImGui.TreeNodeFlags.NoFlag):
-                for title in titles:
-                    self._draw_title(title, managed=True)
+                for title_id, title in categorized_titles[category]:
+                    self._draw_title(title, title_id, managed=True)

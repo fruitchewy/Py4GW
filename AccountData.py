@@ -1,4 +1,5 @@
 from turtle import title
+import sys
 
 from PyParty import Hero
 from Py4GWCoreLib import Map, Agent, Player, GLOBAL_CACHE
@@ -10,13 +11,57 @@ import PyPlayer
 import PyAgent
 import PySkillbar
 
-from typing import Optional, Dict, List, Tuple
-import account_data_src
-from account_data_src.rank_data_src import RankData
-from account_data_src.faction_data_src import FactionData
-from account_data_src.experience_data_src import ExperienceData
-from account_data_src.title_data_src import TitleData
-from account_data_src.quest_data_src import QuestData
+from typing import Optional, Dict, List, Tuple, Type, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from account_data_src.rank_data_src import RankData as RankDataType
+    from account_data_src.faction_data_src import FactionData as FactionDataType
+    from account_data_src.experience_data_src import ExperienceData as ExperienceDataType
+    from account_data_src.title_data_src import TitleData as TitleDataType
+    from account_data_src.quest_data_src import QuestData as QuestDataType
+
+# Dynamic module references (will be populated by reload function)
+RankData: "Type[RankDataType]"
+FactionData: "Type[FactionDataType]"
+ExperienceData: "Type[ExperienceDataType]"
+TitleData: "Type[TitleDataType]"
+QuestData: "Type[QuestDataType]"
+
+def reload_account_data_modules():
+    """Dynamically reload all account_data_src modules and update class references."""
+    global RankData, FactionData, ExperienceData, TitleData, QuestData
+
+    # List of submodules to reload
+    submodule_names = [
+        'account_data_src.rank_data_src',
+        'account_data_src.faction_data_src',
+        'account_data_src.experience_data_src',
+        'account_data_src.title_data_src',
+        'account_data_src.quest_data_src',
+    ]
+
+    # Remove cached modules to force fresh import
+    for name in submodule_names:
+        if name in sys.modules:
+            del sys.modules[name]
+    if 'account_data_src' in sys.modules:
+        del sys.modules['account_data_src']
+
+    # Re-import and update references
+    import account_data_src.rank_data_src
+    import account_data_src.faction_data_src
+    import account_data_src.experience_data_src
+    import account_data_src.title_data_src
+    import account_data_src.quest_data_src
+
+    RankData = account_data_src.rank_data_src.RankData
+    FactionData = account_data_src.faction_data_src.FactionData
+    ExperienceData = account_data_src.experience_data_src.ExperienceData
+    TitleData = account_data_src.title_data_src.TitleData
+    QuestData = account_data_src.quest_data_src.QuestData
+
+# Initial load
+reload_account_data_modules()
 
 MODULE_NAME = "Account Info"
 
