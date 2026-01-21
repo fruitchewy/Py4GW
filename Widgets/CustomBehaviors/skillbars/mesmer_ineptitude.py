@@ -48,7 +48,7 @@ class MesmerIneptitude_UtilitySkillBar(CustomBehaviorBaseUtility):
 #         Deal damage against balled up attacking foes utilizing Ineptitude, Wandering Eye and Signet of Clumsiness.
 
         # core
-        self.ineptitude_utility: CustomSkillUtilityBase = IneptitudeUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerAgentQuantityDefinition(lambda enemy_qte: 75 if enemy_qte >= 2 else 40 if enemy_qte <= 2 else 0))
+        self.ineptitude_utility: CustomSkillUtilityBase = IneptitudeUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerAgentQuantityDefinition(lambda enemy_qte: 75 if enemy_qte >= 2 else 40 if enemy_qte <= 2 else 10))
         self.wandering_eye_utility: CustomSkillUtilityBase = WanderingEyeUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerAgentQuantityDefinition(lambda enemy_qte: 74 if enemy_qte >= 2 else 39 if enemy_qte <= 2 else 0))
         self.signet_of_clumsiness_utility: CustomSkillUtilityBase = SignetOfClumsinessUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerAgentQuantityDefinition(lambda enemy_qte: 76 if enemy_qte >= 2 else 41 if enemy_qte <= 2 else 0))
         self.arcane_conundrum_utility: CustomSkillUtilityBase = ArcaneConundrumUtility(event_bus=self.event_bus, current_build=in_game_build, score_definition=ScorePerAgentQuantityDefinition(lambda enemy_qte: 77 if enemy_qte >= 2 else 42 if enemy_qte <= 2 else 0))

@@ -15,6 +15,7 @@ from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_multiple_target
 from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_target import CustomBuffTarget
 from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_target_per_profession import BuffConfigurationPerProfession
 from Widgets.CustomBehaviors.primitives.skills.bonds.custom_buff_target_per_email import BuffConfigurationPerPlayerEmail
+from Widgets.CustomBehaviors.primitives.skills.bonds.profession_configuration import ProfessionConfiguration
 from Widgets.CustomBehaviors.primitives.skills.custom_skill import CustomSkill
 from Widgets.CustomBehaviors.primitives.skills.custom_skill_utility_base import CustomSkillUtilityBase
 
@@ -42,7 +43,7 @@ class BloodIsPowerUtility(CustomSkillUtilityBase):
         self.sacrifice_life_limit_percent: float = sacrifice_life_limit_percent
         self.sacrifice_life_limit_absolute: int = sacrifice_life_limit_absolute
         self.required_target_mana_lower_than_percent: float = required_target_mana_lower_than_percent
-        self.buff_configuration: CustomBuffMultipleTarget = CustomBuffMultipleTarget(event_bus, self.custom_skill, buff_configuration_per_profession= BuffConfigurationPerProfession.BUFF_CONFIGURATION_CASTERS)
+        self.buff_configuration: CustomBuffMultipleTarget = CustomBuffMultipleTarget(event_bus, self.custom_skill, buff_configuration_per_profession= BuffConfigurationPerProfession.BUFF_CONFIGURATION_CASTERS + [ProfessionConfiguration(Profession.Paragon, True)])
 
     def _get_target(self) -> int | None:
  

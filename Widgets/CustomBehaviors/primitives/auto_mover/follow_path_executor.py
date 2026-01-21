@@ -1,7 +1,6 @@
 from typing import Any, Callable, Generator, List, Tuple
 
-from Py4GWCoreLib import Routines, Agent, Player
-from Py4GWCoreLib.GlobalCache import GLOBAL_CACHE
+from Py4GWCoreLib import Player, Routines, Agent
 from Widgets.CustomBehaviors.primitives import constants
 from Widgets.CustomBehaviors.primitives.auto_mover.path_helper import PathHelper
 from Widgets.CustomBehaviors.primitives.custom_behavior_loader import CustomBehaviorLoader
@@ -56,11 +55,11 @@ class FollowPathExecutor:
         instance.inject_additionnal_utility_skills(MoveToPartyMemberIfInAggroUtility(instance.event_bus, instance.in_game_build))
         instance.inject_additionnal_utility_skills(MoveToEnemyIfCloseEnoughUtility(instance.event_bus, instance.in_game_build))
         instance.inject_additionnal_utility_skills(MoveToPartyMemberIfDeadUtility(instance.event_bus, instance.in_game_build))
-        instance.inject_additionnal_utility_skills(WaitIfPartyMemberManaTooLowUtility(instance.event_bus, instance.in_game_build))
+        #instance.inject_additionnal_utility_skills(WaitIfPartyMemberManaTooLowUtility(instance.event_bus, instance.in_game_build))
         instance.inject_additionnal_utility_skills(WaitIfPartyMemberTooFarUtility(instance.event_bus, instance.in_game_build))
         instance.inject_additionnal_utility_skills(WaitIfPartyMemberNeedsToLootUtility(instance.event_bus, instance.in_game_build))
         instance.inject_additionnal_utility_skills(WaitIfInAggroUtility(instance.event_bus, instance.in_game_build))
-        instance.inject_additionnal_utility_skills(WaitIfLockTakenUtility(instance.event_bus, instance.in_game_build))
+        #instance.inject_additionnal_utility_skills(WaitIfLockTakenUtility(instance.event_bus, instance.in_game_build))
 
         # Create movement generator
         custom_pause_fn: Callable[[], bool] = lambda: instance.is_executing_utility_skills() == True
@@ -71,10 +70,11 @@ class FollowPathExecutor:
             path_points=self.current_path,
             custom_exit_condition=lambda: Agent.IsDead(Player.GetAgentID()),
             tolerance=150,
-            log=constants.DEBUG,
+            log=True,
             timeout=-1,
             progress_callback=self.on_progress,
-            custom_pause_fn=custom_pause_fn
+            custom_pause_fn=custom_pause_fn,
+            skip_ahead_after_pause=True
         )
 
         if constants.DEBUG: print(f"FollowPathExecutor: Started movement with {len(self.current_path)} waypoints, generator={self.generator is not None}")

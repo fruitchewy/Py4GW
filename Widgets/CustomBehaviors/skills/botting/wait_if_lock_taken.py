@@ -47,18 +47,7 @@ class WaitIfLockTakenUtility(CustomSkillUtilityBase):
         # Stop executing if no locks are active for 1.5 seconds
         # This prevents bots from continuing actions when no coordination is needed
 
-        # If locks are active, continue executing (return score)
-        if CustomBehaviorParty().get_shared_lock_manager().is_any_lock_taken():
-            self.no_lock_timer.Reset()  # Reset timer when locks are active
-            return self.score_definition.get_score()
-
-        # If no locks are active, check timer
-        if self.no_lock_timer.IsExpired():
-            # Timer expired with no locks - stop executing
-            return None
-
-        # No locks but timer hasn't expired yet - keep waiting
-        return self.score_definition.get_score()
+        return None
 
     @override
     def _execute(self, state: BehaviorState) -> Generator[Any, None, BehaviorResult]:

@@ -1,6 +1,6 @@
 from collections import deque
 from typing import Any, Callable, Dict, Generator
-from Py4GWCoreLib import IconsFontAwesome5, Map, PyImGui, Player
+from Py4GWCoreLib import IconsFontAwesome5, Map, PyImGui, Player, Quest
 from Py4GWCoreLib.GlobalCache import GLOBAL_CACHE
 from Py4GWCoreLib.Pathing import AutoPathing
 from Py4GWCoreLib.py4gwcorelib_src.Utils import Utils
@@ -216,6 +216,28 @@ def render():
             if PyImGui.small_button("Insert as waypoint"):
                 coordinate = Player.GetXY()
                 auto_follow_path.add_raw_waypoint(coordinate)
+
+            PyImGui.same_line(0,5)
+            if PyImGui.small_button("Path to quest marker"):
+                # Get current position
+                current_pos = Player.GetXY()
+
+                # Get active quest marker
+                active_quest_id = Quest.GetActiveQuest()
+                if active_quest_id != 0:
+                    quest_data = Quest.GetQuestData(active_quest_id)
+                    if quest_data and quest_data.marker_x != 0 and quest_data.marker_y != 0:
+                        x, y = quest_data.marker_x, quest_data.marker_y
+                        if y > 2147483647:
+                            y = y - 4294967296
+                        if x > 2147483647:
+                            x = x - 4294967296
+                        # Clear existing waypoints
+                        auto_follow_path.clear_list_of_waypoints()
+                        # Add current position as first waypoint
+                        auto_follow_path.add_raw_waypoint(current_pos)
+                        # Add quest marker as second waypoint
+                        auto_follow_path.add_raw_waypoint((x, y))
 
         PyImGui.tree_pop()
 
