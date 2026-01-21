@@ -1,8 +1,9 @@
 from typing import Any, Generator, override
 from Py4GWCoreLib.GlobalCache import GLOBAL_CACHE
 from Py4GWCoreLib.enums import Profession, Range
-from Py4GWCoreLib import Agent, Player
+from Py4GWCoreLib import Agent, AgentArray, Player
 from Py4GWCoreLib.enums_src.GameData_enums import Profession_Names
+from Py4GWCoreLib.py4gwcorelib_src.Console import ConsoleLog
 from Widgets.CustomBehaviors.primitives.behavior_state import BehaviorState
 from Widgets.CustomBehaviors.primitives.bus.event_bus import EventBus
 from Widgets.CustomBehaviors.primitives.helpers import custom_behavior_helpers
@@ -47,13 +48,11 @@ class GreatDwarfWeaponUtility(CustomSkillUtilityBase):
                 range_to_count_enemies=None,
                 range_to_count_allies=None)
         if target is None:
-            owner = custom_behavior_helpers.Targets.get_first_or_default_from_allies_ordered_by_priority(
-                within_range=Range.Spellcast,
-                condition=lambda agent_id: Agent.GetProfessionNames(agent_id)[0] == Profession_Names[Profession.Ranger],
-            )
-            if owner is not None and GLOBAL_CACHE.Party.Pets.GetPetID(owner) is not None:
-                return GLOBAL_CACHE.Party.Pets.GetPetID(owner)
-    
+            pets = AgentArray.GetSpiritPetArray()
+            for pet in pets:                 
+                if Agent.IsAlive(pet) and Agent.IsAttacking(pet) and not Agent.IsWeaponSpelled(pet):
+                    return pet
+                                
         return target
 
     @override
