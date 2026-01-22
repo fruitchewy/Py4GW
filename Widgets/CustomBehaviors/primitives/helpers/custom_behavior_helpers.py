@@ -721,6 +721,14 @@ class Targets:
         
         agent_ids: list[int] = AgentArray.GetEnemyArray()
         agent_ids = AgentArray.Filter.ByDistance(agent_ids, source_agent_pos, within_range)
+
+        # we add leader's area too
+        if not GLOBAL_CACHE.Party.IsPartyLeader():
+            party_leader_agent_id = GLOBAL_CACHE.Party.GetPartyLeaderID()
+            party_leader_pos = Agent.GetXY(party_leader_agent_id)
+            leader_agent_ids = AgentArray.Filter.ByDistance(agent_ids, party_leader_pos, within_range)
+            agent_ids.extend(leader_agent_ids)
+
         agent_ids = AgentArray.Filter.ByCondition(agent_ids, lambda agent_id: Agent.IsAlive(agent_id))
         if condition is not None: agent_ids = AgentArray.Filter.ByCondition(agent_ids, condition)
 
