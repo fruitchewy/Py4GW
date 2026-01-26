@@ -137,32 +137,6 @@ class OpenNearDungeonChestUtility(CustomSkillUtilityBase):
             # Always release the lock, even if an exception occurs
             CustomBehaviorParty().get_shared_lock_manager().release_lock(lock_key)
 
-    def wait_for_chest_window_to_open(self, chest_agent_id: int) -> Generator[Any, None, bool]:
-        
-        # 1) reset the timer if not running
-        if self.window_open_timeout.IsStopped():
-            self.window_open_timeout.Reset()
-
-        # 2) now repeat those step until timeout
-
-        while not self.window_open_timeout.IsExpired():
-
-            # 2.a) interact with the chest
-            if self.dedicated_debug: print(f"open_near_dungeon_chest_utility_ Interact")
-            Player.Interact(chest_agent_id, call_target=False)
-            yield from custom_behavior_helpers.Helpers.wait_for(150)
-
-            # 2.b) wait for the chest window to open
-            if self.dedicated_debug: print(f"open_near_dungeon_chest_utility_ wait_for_chest_window_to_open")
-            if UIManager.IsLockedChestWindowVisible():
-                self.window_open_timeout.Stop()
-                return True
-        
-        # 3) timeout
-        print(f"open_near_dungeon_chest_utility_ TIMEOUT waiting for chest window to open (chest_agent_id={chest_agent_id})")
-        self.window_open_timeout.Stop()
-        return False
-
     @override
     def customized_debug_ui(self, current_state: BehaviorState) -> None:
         PyImGui.bullet_text(f"GetNearestDungeonChest : {custom_behavior_helpers.Resources.get_nearest_dungeon_chest(700)}")

@@ -141,6 +141,8 @@ class Resources:
             GadgetModelID.CHEST_HIDDEN_STASH.value,
             GadgetModelID.CHEST_ASCALONIAN.value,
             GadgetModelID.CHEST_SHING_JEA.value,
+            GadgetModelID.CHEST_KOURNAN.value,
+            GadgetModelID.CHEST_DARKSTONE.value,
             GadgetModelID.CHEST_GENERIC.value,
         ]
 
@@ -717,8 +719,16 @@ class Targets:
             range_to_count_enemies: float | None = None,
             should_prioritize_party_target:bool = True) -> list[SortableAgentData]:
         
-        agent_ids: list[int] = AgentArray.GetEnemyArray()
-        agent_ids = AgentArray.Filter.ByDistance(agent_ids, source_agent_pos, within_range)
+        all_agent_ids: list[int] = AgentArray.GetEnemyArray()
+        agent_ids = AgentArray.Filter.ByDistance(all_agent_ids, source_agent_pos, within_range)
+
+        # we add leader's area too
+        if not GLOBAL_CACHE.Party.IsPartyLeader():
+            party_leader_agent_id = GLOBAL_CACHE.Party.GetPartyLeaderID()
+            party_leader_pos = Agent.GetXY(party_leader_agent_id)
+            leader_agent_ids = AgentArray.Filter.ByDistance(all_agent_ids, party_leader_pos, within_range)
+            agent_ids.extend(leader_agent_ids)
+
         agent_ids = AgentArray.Filter.ByCondition(agent_ids, lambda agent_id: Agent.IsAlive(agent_id))
         if condition is not None: agent_ids = AgentArray.Filter.ByCondition(agent_ids, condition)
 
