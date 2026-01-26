@@ -184,6 +184,9 @@ class Player:
         Returns: str
         """
         try:
+            if not Player.IsPlayerLoaded():
+                return ""
+            
             if (char_ctx := GWContext.Char.GetContext()) is None:
                 return ""
             account_email = char_ctx.player_email_str
