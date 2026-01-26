@@ -1,6 +1,7 @@
 from typing import Any, Generator, override
 
-from Py4GWCoreLib import GLOBAL_CACHE, AgentArray, Agent, Range, Player
+from Py4GWCoreLib import GLOBAL_CACHE, AgentArray, Agent, Range
+from Py4GWCoreLib.Player import Player
 from Widgets.CustomBehaviors.primitives.bus.event_bus import EventBus
 from Widgets.CustomBehaviors.primitives.helpers import custom_behavior_helpers
 from Widgets.CustomBehaviors.primitives.helpers.behavior_result import BehaviorResult
@@ -55,5 +56,5 @@ class WaitIfPartyMemberTooFarUtility(CustomSkillUtilityBase):
 
     @override
     def _execute(self, state: BehaviorState) -> Generator[Any, None, BehaviorResult]:
-        yield from custom_behavior_helpers.Helpers.wait_for(100) # we stuck the flow. (not yield from)
+        yield from custom_behavior_helpers.Helpers.wait_for(300) # we stuck the flow. (not yield from)
         return BehaviorResult.ACTION_PERFORMED

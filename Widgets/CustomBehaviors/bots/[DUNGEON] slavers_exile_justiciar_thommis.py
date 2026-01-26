@@ -2,116 +2,196 @@ from Py4GWCoreLib import Botting
 from Widgets.CustomBehaviors.primitives.botting.botting_helpers import BottingHelpers
 from Widgets.CustomBehaviors.primitives.parties.custom_behavior_party import CustomBehaviorParty
 
+# Map IDs
+UMBRAL_GROTTO_MAP_ID = 639  # Outpost
+VERDANT_CASCADES_MAP_ID = 566  # Explorable area to reach dungeon
+SLAVERS_EXILE_MAP_ID = 577  # Dungeon entrance level
+JUSTICIAR_THOMMIS_ROOM_MAP_ID = 620  # Boss room
+
+# Waypoint paths extracted from VoltaicSpearTeamFarm.py
+VERDANT_CASCADES_TRAVEL_PATH = [
+    (-19887, 6074),
+    (-10273, 3251),
+    (-6878, -329),
+    (-3041, -3446),
+    (3571, -9501),
+    (4721, -10626),
+    (10764, -6448),
+    (13063, -4396),
+    (18054, -3275),
+    (20966, -6476),
+    (25298, -9456),
+]
+
+ENTER_DUNGEON_PATH = [
+    (-16797, 9251),
+    (-17835, 12524),
+]
+
+# Path 1: Initial clearing route in Justiciar Thommis room
+SLAVERS_EXILE_PATH_PRE_PATH_1 = (-12590, -17740)
+SLAVERS_EXILE_TRAVEL_PATH_1 = [
+    (-13480, -16570),
+    (-13500, -15750),
+    (-12500, -15000),
+    (-10400, -14800),
+    (-10837, -13823),
+    (-11500, -13300),
+    (-12175, -12211),
+    (-13400, -11500),
+    (-13700, -9550),
+    (-14100, -8600),
+    (-15000, -7500),
+    (-16000, -7112),
+    (-17347, -7438),
+]
+
+# Path 2: Second clearing route to boss
+SLAVERS_EXILE_PATH_PRE_PATH_2 = (-18781, -8064)
+SLAVERS_EXILE_TRAVEL_PATH_2 = [
+    (-19083, -10150),
+    (-18500, -11500),
+    (-17700, -12500),
+    (-17663, -13497),
+]
+
+# Final chest location
+FINAL_CHEST_POSITION = (-17461, -14258)
+
+
 def bot_routine(bot_instance: Botting):
+    """
+    Main bot routine for farming Slavers Exile - Justiciar Thommis room.
 
-    CustomBehaviorParty().set_party_is_blessing_enabled(False) # Norn NPC are not well identified
+    This script handles:
+    - Traveling to Umbral Grotto outpost
+    - Navigating through Verdant Cascades to Slavers Exile
+    - Entering the Justiciar Thommis boss room
+    - Clearing two main paths through the dungeon
+    - Looting the final chest
+    - Resigning and looping back
+    """
 
-    # todo DISABLE LOOT FOR SOME PART might be interessting
+    # Disable blessing due to Norn NPC identification issues
+    CustomBehaviorParty().set_party_is_blessing_enabled(False)
 
+    # Register error handlers for critical failures
     bot_instance.Templates.Routines.UseCustomBehaviors(
         on_player_critical_death=BottingHelpers.botting_unrecoverable_issue,
         on_party_death=BottingHelpers.botting_unrecoverable_issue,
-        on_player_critical_stuck=BottingHelpers.botting_unrecoverable_issue)
+        on_player_critical_stuck=BottingHelpers.botting_unrecoverable_issue
+    )
 
+    # Enable aggressive combat behavior
     bot_instance.Templates.Aggressive()
 
+    # === MAIN LOOP ===
     bot_instance.States.AddHeader("MAIN_LOOP")
-    bot_instance.Map.Travel(target_map_id=639)
+    bot_instance.Map.Travel(target_map_id=UMBRAL_GROTTO_MAP_ID)
     bot_instance.Party.SetHardMode(True)
 
-    bot_instance.States.AddHeader("EXIT_OUTPOST")
-    bot_instance.Move.XY(-22735, 6339, "exit outpost")
-    bot_instance.config.FSM.AddSelfManagedYieldStep("we are out of the outpost", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(566 , timeout_ms = 15_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
+    # === EXIT TO VERDANT CASCADES ===
+    bot_instance.States.AddHeader("EXIT_TO_VERDANT_CASCADES")
+    bot_instance.Move.XY(-22735, 6339, "exit outpost to Verdant Cascades")
+    bot_instance.Wait.ForMapLoad(target_map_id=VERDANT_CASCADES_MAP_ID)
+    bot_instance.Wait.ForTime(2_000)
 
-    bot_instance.States.AddHeader("GO_TO_DUNGEON")
-    go_to_dungeon_waypoints = [ (-19887, 6074), (-10273, 3251), (-6878, -329), (-3041, -3446), (3571, -9501), (4721, -10626), (10764, -6448), (13063, -4396), (18054, -3275), (20966, -6476), (25298, -9456) ]
-    for waypoint in go_to_dungeon_waypoints:
-        bot_instance.Move.XY(waypoint[0], waypoint[1], "go to dungeon waypoint")
-    bot_instance.Move.XY(25729, -9360, "enter dungeon instance")
-    bot_instance.config.FSM.AddSelfManagedYieldStep("we are in the dungeon", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(577 , timeout_ms = 15_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
+    # === NAVIGATE TO SLAVERS EXILE ===
+    bot_instance.States.AddHeader("NAVIGATE_TO_SLAVERS_EXILE")
+    for waypoint in VERDANT_CASCADES_TRAVEL_PATH:
+        bot_instance.Move.XY(waypoint[0], waypoint[1], "navigate to dungeon")
 
-    bot_instance.States.AddHeader("GO_TO_JUSTICIAR_THOMMIS_ROOM")
-    bot_instance.Move.XY(-16797, 9251, "go to justiciar thommis room waypoint 1")
-    bot_instance.Move.XY(-17835, 12524, "go to justiciar thommis room waypoint 2")
-    bot_instance.Move.XY(-18656, 13136, "enter justiciar thommis room")
-    bot_instance.config.FSM.AddSelfManagedYieldStep("we are in the justiciar thommis room", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(620 , timeout_ms = 15_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
+    # Move to dungeon portal (auto-zones when close enough)
+    bot_instance.Move.XY(25729, -9360, "enter Slavers Exile portal", forced_timeout=15)
+    bot_instance.config.FSM.AddSelfManagedYieldStep(
+        "wait for Slavers Exile map load",
+        lambda: BottingHelpers.wrapper(
+            action=BottingHelpers.wait_until_on_map(SLAVERS_EXILE_MAP_ID, timeout_ms=15_000),
+            on_failure=BottingHelpers.botting_unrecoverable_issue
+        )
+    )
 
-    bot_instance.States.AddHeader("JUSTICIAR_THOMMIS_ROOM")
+    # === ENTER JUSTICIAR THOMMIS ROOM ===
+    bot_instance.States.AddHeader("ENTER_JUSTICIAR_THOMMIS_ROOM")
+    for waypoint in ENTER_DUNGEON_PATH:
+        bot_instance.Move.XY(waypoint[0], waypoint[1], "navigate to boss room entrance")
 
-    # bot_instance.config.FSM.AddSelfManagedYieldStep("we are in the justiciar thommis room", lambda: PartyFollowingManager().apply_preset(xxxx))
+    # Move to boss room portal (auto-zones when close enough)
+    bot_instance.Move.XY(-18656, 13136, "enter Justiciar Thommis room portal", forced_timeout=15)
+    bot_instance.config.FSM.AddSelfManagedYieldStep(
+        "wait for Justiciar Thommis room map load",
+        lambda: BottingHelpers.wrapper(
+            action=BottingHelpers.wait_until_on_map(JUSTICIAR_THOMMIS_ROOM_MAP_ID, timeout_ms=15_000),
+            on_failure=BottingHelpers.botting_unrecoverable_issue
+        )
+    )
 
-    go_to_justiciar_thommis_room_waypoints = [ (-13480, -16570), (-13500, -15750), (-12500, -15000), (-10400, -14800), (-10837, -13823), (-11500, -13300), (-12175, -12211), (-13400, -11500), (-13700, -9550), (-14100, -8600), (-15000, -7500), (-16000, -7112), (-17347, -7438), (-18781, -8064), (-19083, -10150), (-18500, -11500), (-17700, -12500), (-17500, -14250) ]
+    # === CLEAR PATH 1 ===
+    bot_instance.States.AddHeader("CLEAR_PATH_1")
+    bot_instance.Move.XY(
+        SLAVERS_EXILE_PATH_PRE_PATH_1[0],
+        SLAVERS_EXILE_PATH_PRE_PATH_1[1],
+        "move to path 1 starting position"
+    )
 
-    for waypoint in go_to_justiciar_thommis_room_waypoints:
-        bot_instance.Move.XY(waypoint[0], waypoint[1], "go to justiciar thommis room waypoint")
+    for waypoint in SLAVERS_EXILE_TRAVEL_PATH_1:
+        bot_instance.Move.XY(waypoint[0], waypoint[1], "clear path 1")
 
-    bot_instance.Move.XY(-17461, -14258, "move to end chest")
-    bot_instance.Wait.ForTime(30000_000)
+    # === CLEAR PATH 2 ===
+    bot_instance.States.AddHeader("CLEAR_PATH_2")
+    bot_instance.Move.XY(
+        SLAVERS_EXILE_PATH_PRE_PATH_2[0],
+        SLAVERS_EXILE_PATH_PRE_PATH_2[1],
+        "move to path 2 starting position"
+    )
 
-    # go_to_quest_npc_waypoint = [ (-8943, -17972), (-5884, -16116), (-1499, -14280), (-2306, -11017), (-3198, -9062), (-906, -7811), (732, -7466), (1839, -5173), (3377, -5290), (4687, -5077), (5758, -3946), (6667, -2805), (7509, -1731), (9623, -806), (10714, -853), (12196, 268), (11328, 4192), (10943, 8387), (11911, 11401), (12321, 14909), (13463, 19013), (12990, 20236), (12151, 22222), (12267, 22764) ]
-    # for waypoint in go_to_quest_npc_waypoint:
-    #     bot_instance.Move.XY(waypoint[0], waypoint[1], "go to quest npc waypoint")
-    # bot_instance.Move.XY(12275, 22766, "go to quest npc giriff")
+    for waypoint in SLAVERS_EXILE_TRAVEL_PATH_2:
+        bot_instance.Move.XY(waypoint[0], waypoint[1], "clear path 2")
 
-    # bot_instance.States.AddHeader("MANAGE_NPC_QUEST_AND_ENTER_DUNGEON")
+    # === FINAL CHEST & LOOT ===
+    bot_instance.States.AddHeader("LOOT_FINAL_CHEST")
+    bot_instance.Move.XY(FINAL_CHEST_POSITION[0], FINAL_CHEST_POSITION[1], "move to final chest")
 
-    # bot_instance.Move.XY(12275, 22766, "go to quest npc giriff")
-    # bot_instance.Dialogs.AtXY(12275, 22766, 0x832201, "take quest")
-    # bot_instance.Wait.ForTime(1000)
-    # bot_instance.Dialogs.AtXY(12275, 22766, 0x832205, "talk to giriff again")
-    # bot_instance.Wait.ForTime(1000)
-    # bot_instance.Move.XY(14810, 27689, "enter dungeon instance")
-    # bot_instance.config.FSM.AddSelfManagedYieldStep("we are in the dungeon - level 1", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(615 , timeout_ms = 15_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
+    # Wait for automatic looting to complete (CustomBehaviors auto-loots chest)
+    bot_instance.Wait.ForTime(120_000)
 
-    # bot_instance.Wait.ForTime(500)
+    # === RESIGN & RETURN ===
+    bot_instance.States.AddHeader("RESIGN_PARTY")
+    bot_instance.config.FSM.AddSelfManagedYieldStep(
+        "wait for party resign",
+        lambda: BottingHelpers.wrapper(
+            action=BottingHelpers.wait_until_party_resign(timeout_ms=50_000),
+            on_failure=BottingHelpers.botting_unrecoverable_issue
+        )
+    )
+    bot_instance.Wait.ForMapLoad(target_map_id=UMBRAL_GROTTO_MAP_ID)
 
-    # bot_instance.States.AddHeader("GO_TO_DUNGEON_LEVEL_2")
-    # level1_waypoints = [ (15180, 1528), (15180, 5346), (18940, 8027), (16807, 8311), (15350, 8325), (12286, 7186), (9936, 6967), (9141, 7041), (8121, 6403), (6436, 5069), (4294, 605), (1345, -1254), (-869, -3962), (-1266, -5683), (-1086, -6701), (-658, -7382), (26, -8628), (2107, -11331), (5809, -12957), (6022, -13895), (6993, -16719), (7753, -19280) ]
-    # for waypoint in level1_waypoints:
-    #     bot_instance.Move.XY(waypoint[0], waypoint[1], "level 1 waypoints")
+    # === REFRESH INSTANCE ===
+    bot_instance.States.AddHeader("REFRESH_INSTANCE")
+    # Exit to Verdant Cascades to refresh the instance
+    bot_instance.Move.XY(-22735, 6339, "exit to refresh instance")
+    bot_instance.Wait.ForMapLoad(target_map_id=VERDANT_CASCADES_MAP_ID)
 
-    # bot_instance.config.FSM.AddSelfManagedYieldStep("we are in the dungeon - level 2", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(616 , timeout_ms = 300_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
-    # bot_instance.Wait.ForTime(500)
+    # Re-enter outpost
+    bot_instance.Move.XY(-23139, 8233, "re-enter Umbral Grotto")
+    bot_instance.Wait.ForMapLoad(target_map_id=UMBRAL_GROTTO_MAP_ID)
 
-    # bot_instance.States.AddHeader("GO_TO_BOSS_KEY")
-    # level2_waypoints = [ (-11195, -5346), (-8925, -3654), (-9103, -2458), (-9750, -966), (-8832, 291), (-6204, 3410), (-5058, 3652), (-4280, 4526), (-3806, 5217), (-2511, 5663), (-2633, 8081), (-1182, 7879), (-526, 8509), (21, 9996), (-383, 11207), (473, 11686), (2807, 12326), (3285, 13363), (3684, 13942), (4362, 13750), (5696, 13389), (5725, 12976), (5742, 11691), (6646, 10412), (6909, 9016), (8390, 6811), (8236, 5574), (8319, 4284), (8308, 2983), (8741, 2146), (9722, -1779) ]
-    # for waypoint in level2_waypoints:
-    #     bot_instance.Move.XY(waypoint[0], waypoint[1], "level 2 waypoints")
-
-    # bot_instance.States.AddHeader("LOOT_BOSS_KEY")
-    # bot_instance.Move.XY(9722, -1779, "go to the boss key")
-    # bot_instance.config.FSM.AddSelfManagedYieldStep("loot the boss key.", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_item_looted("Boss Key" , timeout_ms = 15_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
-
-    # bot_instance.States.AddHeader("OPEN_BOSS_LOCK")
-    # bot_instance.Move.XY(17900, -6256, "go to the boss lock")
-    # bot_instance.Interact.WithGadgetAtXY(17900, -6256)
-
-    # bot_instance.States.AddHeader("END_CHEST")
-    # chest_waypoints =[ (17609, -6362), (18153, -8601), (17379, -9724), (16787, -10330), (17585, -12000), (18212, -12660), (18037, -13641), (17140, -14356), (15665, -14777), (14965, -15159), (14789, -15820), (15262, -17614), (15326, -18086), (15138, -19140) ]
-    # for waypoint in chest_waypoints:
-    #     bot_instance.Move.XY(waypoint[0], waypoint[1], "go to chest waypoints")
-
-    # bot_instance.Move.XY(15099, -19138, "GO TO THE END CHEST") # GadgetId=8932 IsGadget=true
-
-    # bot_instance.Wait.ForTime(30_000)
-
-    # bot_instance.States.AddHeader("TAKE_QUEST_REWARD_AND_WAIT_DUNGEON_ENDS")
-    # bot_instance.Move.XY(15279, -17354, "go to npc")
-    # bot_instance.Dialogs.WithModel(6745, 0x832207, "accept quest reward")
-    # bot_instance.Move.XY(15099, -19138, "go back to the end chest") # GadgetId=8932 IsGadget=true
-
-    # bot_instance.config.FSM.AddSelfManagedYieldStep("goes out of the dungeon", lambda: BottingHelpers.wrapper(action=BottingHelpers.wait_until_on_map(558 , timeout_ms = 400_000), on_failure=BottingHelpers.botting_unrecoverable_issue))
-
-    # bot_instance.States.JumpToStepName("[H]MANAGE_NPC_QUEST_AND_ENTER_DUNGEON_4")
+    # === LOOP BACK ===
+    bot_instance.States.JumpToStepName("[H]MAIN_LOOP_1")
 
     bot_instance.States.AddHeader("END")
 
-bot = Botting("[DUNGEON] Slavers Exile Justiciar Thommis")
+
+# Initialize bot instance with descriptive name
+bot = Botting("[DUNGEON] Slavers Exile - Justiciar Thommis")
 bot.SetMainRoutine(bot_routine)
 
+
 def main():
+    """Main update loop for the bot UI."""
     bot.Update()
     bot.UI.draw_window()
+
 
 if __name__ == "__main__":
     main()

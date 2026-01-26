@@ -47,8 +47,7 @@ class WaitIfPartyMemberManaTooLowUtility(CustomSkillUtilityBase):
             if Agent.GetHealth(agent_id) < 0.4:
                 return self.score_definition.get_score()
             if custom_behavior_helpers.Resources.get_energy_percent_in_party(agent_id) < self.mana_limit:
-                if not Agent.GetEnergyRegen(agent_id) >= 5:
-                    return self.score_definition.get_score()
+                return self.score_definition.get_score()
 
         return None
 

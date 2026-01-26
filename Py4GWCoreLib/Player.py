@@ -189,10 +189,7 @@ class Player:
             account_email = char_ctx.player_email_str
             if account_email:
                 return account_email
-            player_uuid = Player.GetPlayerUUID()
-            if all(part == 0 for part in player_uuid):
-                return ""
-            return Player._format_uuid_as_email(player_uuid)
+            return "steam_account"
         except Exception:
             return ""
     
