@@ -6,10 +6,73 @@ import importlib.util
 import os
 import types
 import sys
+import time
+from collections import deque
+from dataclasses import dataclass, field
 
 module_name = "Widget Manager"
 ini_file_location = "Py4GW.ini"
 ini_handler = IniHandler(ini_file_location)
+
+# Profiling constants
+DEFAULT_PROFILING_BUFFER_SIZE = 100  # Default number of samples to keep per widget
+
+def _create_profiling_data_with_size(size: int) -> 'WidgetProfilingData':
+    """Factory function to create WidgetProfilingData with a specific buffer size."""
+    data = WidgetProfilingData()
+    data.resize_buffers(size)
+    return data
+
+@dataclass
+class WidgetProfilingData:
+    """Stores profiling data for a single widget."""
+    main_times: deque = field(default_factory=lambda: deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE))
+    minimal_times: deque = field(default_factory=lambda: deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE))
+    configure_times: deque = field(default_factory=lambda: deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE))
+
+    def add_main_time(self, elapsed_ms: float):
+        self.main_times.append(elapsed_ms)
+
+    def add_minimal_time(self, elapsed_ms: float):
+        self.minimal_times.append(elapsed_ms)
+
+    def add_configure_time(self, elapsed_ms: float):
+        self.configure_times.append(elapsed_ms)
+
+    def resize_buffers(self, new_size: int):
+        """Resize all buffers to a new maxlen, preserving existing data."""
+        self.main_times = deque(self.main_times, maxlen=new_size)
+        self.minimal_times = deque(self.minimal_times, maxlen=new_size)
+        self.configure_times = deque(self.configure_times, maxlen=new_size)
+
+    def get_main_stats(self) -> tuple[float, float, float, float]:
+        """Returns (avg, min, max, total) for main() times in ms."""
+        if not self.main_times:
+            return (0.0, 0.0, 0.0, 0.0)
+        times = list(self.main_times)
+        return (sum(times) / len(times), min(times), max(times), sum(times))
+
+    def get_minimal_stats(self) -> tuple[float, float, float, float]:
+        """Returns (avg, min, max, total) for minimal() times in ms."""
+        if not self.minimal_times:
+            return (0.0, 0.0, 0.0, 0.0)
+        times = list(self.minimal_times)
+        return (sum(times) / len(times), min(times), max(times), sum(times))
+
+    def get_combined_stats(self) -> tuple[float, float, float, int]:
+        """Returns (avg, min, max, sample_count) combining main and minimal times."""
+        main_avg, main_min, main_max, _ = self.get_main_stats()
+        minimal_avg, minimal_min, minimal_max, _ = self.get_minimal_stats()
+        combined_avg = main_avg + minimal_avg
+        combined_min = main_min + minimal_min
+        combined_max = main_max + minimal_max
+        sample_count = max(len(self.main_times), len(self.minimal_times))
+        return (combined_avg, combined_min, combined_max, sample_count)
+
+    def clear(self):
+        self.main_times.clear()
+        self.minimal_times.clear()
+        self.configure_times.clear()
 
 class Widget:
     def __init__(self, name : str, module: ModuleType, widget_data: dict):
@@ -61,6 +124,7 @@ class Widget:
     
     def save_widget_state(self):
         ini_handler.write_key(self.name, "enabled", str(self.enabled))
+        ini_handler.write_key(self.name, "optional", str(self.optional))
 
 class WidgetHandler:
     _instance = None
@@ -72,6 +136,13 @@ class WidgetHandler:
 
     def __init__(self, widgets_path="Widgets"):
         if getattr(self, "_initialized", False):
+            # Ensure profiling state exists even on already-initialized handler
+            if not hasattr(self, "_WidgetHandler__profiling_enabled"):
+                self.__profiling_enabled = False
+                self.__profiling_data: dict[str, WidgetProfilingData] = {}
+                self.__loop_start_time = 0.0
+                self.__loop_times: deque = deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE)
+                self.__profiling_buffer_size = DEFAULT_PROFILING_BUFFER_SIZE
             return
 
         import sys
@@ -91,15 +162,96 @@ class WidgetHandler:
         self.last_write_time = Timer()
         self.last_write_time.Start()
         self._load_widget_cache()
+
+        # Profiling state
+        self.__profiling_enabled = False
+        self.__profiling_data: dict[str, WidgetProfilingData] = {}
+        self.__loop_start_time = 0.0
+        self.__loop_times: deque = deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE)
+        self.__profiling_buffer_size = DEFAULT_PROFILING_BUFFER_SIZE
+
         self._initialized = True
     
     @property
     def pause_optional_widgets(self):
         return self.__pause_optional_widgets
-    
+
     @property
     def show_widget_ui(self):
         return self.__show_widget_ui
+
+    def _ensure_profiling_initialized(self):
+        """Ensure profiling state is initialized (for backwards compatibility)."""
+        if not hasattr(self, "_WidgetHandler__profiling_enabled"):
+            self.__profiling_enabled = False
+            self.__profiling_data = {}
+            self.__loop_start_time = 0.0
+            self.__loop_times = deque(maxlen=DEFAULT_PROFILING_BUFFER_SIZE)
+            self.__profiling_buffer_size = DEFAULT_PROFILING_BUFFER_SIZE
+
+    @property
+    def profiling_enabled(self):
+        self._ensure_profiling_initialized()
+        return self.__profiling_enabled
+
+    def enable_profiling(self):
+        """Enable widget execution profiling."""
+        self._ensure_profiling_initialized()
+        self.__profiling_enabled = True
+
+    def disable_profiling(self):
+        """Disable widget execution profiling."""
+        self._ensure_profiling_initialized()
+        self.__profiling_enabled = False
+
+    def clear_profiling_data(self):
+        """Clear all collected profiling data."""
+        self._ensure_profiling_initialized()
+        self.__profiling_data.clear()
+        self.__loop_times.clear()
+
+    def get_profiling_data(self) -> dict[str, WidgetProfilingData]:
+        """Get the profiling data dictionary."""
+        self._ensure_profiling_initialized()
+        return self.__profiling_data
+
+    def get_loop_times(self) -> deque:
+        """Get the loop execution times."""
+        self._ensure_profiling_initialized()
+        return self.__loop_times
+
+    def get_loop_stats(self) -> tuple[float, float, float]:
+        """Returns (avg, min, max) for total loop times in ms."""
+        self._ensure_profiling_initialized()
+        if not self.__loop_times:
+            return (0.0, 0.0, 0.0)
+        times = list(self.__loop_times)
+        return (sum(times) / len(times), min(times), max(times))
+
+    def get_profiling_buffer_size(self) -> int:
+        """Get the current profiling buffer size."""
+        self._ensure_profiling_initialized()
+        return self.__profiling_buffer_size
+
+    def set_profiling_buffer_size(self, new_size: int):
+        """Set the profiling buffer size and resize all existing buffers."""
+        self._ensure_profiling_initialized()
+        new_size = max(10, min(10000, new_size))  # Clamp between 10 and 10000
+        if new_size == self.__profiling_buffer_size:
+            return
+        self.__profiling_buffer_size = new_size
+        # Resize loop times buffer
+        self.__loop_times = deque(self.__loop_times, maxlen=new_size)
+        # Resize all widget profiling buffers
+        for widget_data in self.__profiling_data.values():
+            widget_data.resize_buffers(new_size)
+
+    def _get_or_create_profiling_data(self, widget_name: str) -> WidgetProfilingData:
+        """Get or create profiling data for a widget."""
+        self._ensure_profiling_initialized()
+        if widget_name not in self.__profiling_data:
+            self.__profiling_data[widget_name] = _create_profiling_data_with_size(self.__profiling_buffer_size)
+        return self.__profiling_data[widget_name]
 
     def _load_widget_cache(self):
         for section in ini_handler.list_sections():
@@ -110,6 +262,7 @@ class WidgetHandler:
                 "category": ini_handler.read_key(section, "category", "Miscellaneous"),
                 "subcategory": ini_handler.read_key(section, "subcategory", "Others"),
                 "enabled": ini_handler.read_bool(section, "enabled", True),
+                "optional": ini_handler.read_bool(section, "optional", True),
             }
 
     def _load_all_from_dir(self):
@@ -177,29 +330,51 @@ class WidgetHandler:
         alpha = style.Alpha
         ui_enabled = self.__show_widget_ui
         pause_optional = self.__pause_optional_widgets
-                
+
+        # Ensure profiling is initialized and get state
+        self._ensure_profiling_initialized()
+        profiling = self.__profiling_enabled
+
+        # Start loop timing if profiling
+        if profiling:
+            loop_start = time.perf_counter()
+
         if not ui_enabled:
             style.Alpha = 0.0
             style.Push()
-        
+
         for widget_name, widget_info in self.widgets.items():
             if not widget_info.enabled:
                 continue
-        
+
+            # Execute minimal() with optional profiling
             if widget_info.minimal:
                 try:
-                    widget_info.minimal()
+                    if profiling:
+                        start = time.perf_counter()
+                        widget_info.minimal()
+                        elapsed_ms = (time.perf_counter() - start) * 1000.0
+                        self._get_or_create_profiling_data(widget_name).add_minimal_time(elapsed_ms)
+                    else:
+                        widget_info.minimal()
                 except Exception as e:
                     ConsoleLog("WidgetHandler", f"Error executing minimal of widget {widget_name}: {str(e)}", Py4GW.Console.MessageType.Error)
                     ConsoleLog("WidgetHandler", f"Stack trace: {traceback.format_exc()}", Py4GW.Console.MessageType.Error)
-                    
-            if pause_optional and widget_info.optional:                        
+
+            if pause_optional and widget_info.optional:
                 continue
-            
+
+            # Execute main() with optional profiling
             try:
                 if widget_info.main:
-                    widget_info.main()
-                    
+                    if profiling:
+                        start = time.perf_counter()
+                        widget_info.main()
+                        elapsed_ms = (time.perf_counter() - start) * 1000.0
+                        self._get_or_create_profiling_data(widget_name).add_main_time(elapsed_ms)
+                    else:
+                        widget_info.main()
+
             except Exception as e:
                 ConsoleLog("WidgetHandler", f"Error executing widget {widget_name}: {str(e)}", Py4GW.Console.MessageType.Error)
                 ConsoleLog("WidgetHandler", f"Stack trace: {traceback.format_exc()}", Py4GW.Console.MessageType.Error)
@@ -207,6 +382,11 @@ class WidgetHandler:
         if not ui_enabled:
             style.Alpha = alpha
             style.Push()
+
+        # Record loop time if profiling
+        if profiling:
+            loop_elapsed_ms = (time.perf_counter() - loop_start) * 1000.0
+            self.__loop_times.append(loop_elapsed_ms)
         
     def set_widget_ui_visibility(self, visible: bool):
         self.__show_widget_ui = visible
@@ -356,7 +536,7 @@ def draw_widget_ui():
         else:
             handler.resume_widgets()
             
-        own_email = Player.GetAccountEmail()
+        own_email = GLOBAL_CACHE.Player.GetAccountEmail()
         for acc in GLOBAL_CACHE.ShMem.GetAllAccountData():
             if acc.AccountEmail == own_email:
                 continue
@@ -375,7 +555,7 @@ def draw_widget_ui():
         categorized_widgets.setdefault(cat, {}).setdefault(sub, []).append(name)
 
     for cat, subs in categorized_widgets.items():
-        open = ImGui.collapsing_header(f"{cat}##CategoryHeader")
+        open = ImGui.collapsing_header(cat)
         
         if not open:
             continue
@@ -387,7 +567,7 @@ def draw_widget_ui():
             if style.Theme not in ImGui.Textured_Themes:
                 style.TextTreeNode.push_color((255, 200, 100, 255))
                 
-            open = ImGui.tree_node(f"{sub}##{cat} Subcategory")
+            open = ImGui.tree_node(sub)
             
             if style.Theme not in ImGui.Textured_Themes:
                 style.TextTreeNode.pop_color()
