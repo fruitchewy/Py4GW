@@ -490,6 +490,8 @@ class Yield:
                             ConsoleLog("FollowPath", "Custom pause condition active, pausing movement...", Console.MessageType.Debug, log=log)
                             start_time = Utils.GetBaseTimestamp()  # Reset timeout timer
                             yield from Yield.wait(750)
+                            
+                        if not Checks.Map.MapValid(): ActionQueueManager().ResetAllQueues(); return False
 
                         # After resuming from pause, find the closest upcoming waypoint within max distance
                         if skip_ahead_after_pause:

@@ -6,7 +6,6 @@ from typing import Any, Generator, override
 
 import PyImGui
 
-from HeroAI.types import PlayerStruct
 from Py4GWCoreLib import GLOBAL_CACHE, Agent, Routines, Range, Player
 from Py4GWCoreLib.Py4GWcorelib import ActionQueueManager, ThrottledTimer, Utils
 from Widgets.CustomBehaviors.primitives.helpers import custom_behavior_helpers
@@ -64,10 +63,9 @@ class FollowPartyLeaderUtility(CustomSkillUtilityBase):
             return None
 
         party_number = GLOBAL_CACHE.Party.GetOwnPartyNumber()
-        from HeroAI.cache_data import CacheData
-        cached_data = CacheData()
-        all_player_struct:list[PlayerStruct] = cached_data.HeroAI_vars.all_player_struct
-        if all_player_struct[party_number].IsFlagged: return None
+        hero_ai_options = GLOBAL_CACHE.ShMem.GetGerHeroAIOptionsByPartyNumber(party_number)
+        if hero_ai_options is not None and hero_ai_options.IsFlagged:
+            return None
 
         party_leader_position:tuple[float, float] = Agent.GetXY(GLOBAL_CACHE.Party.GetPartyLeaderID())
         max_distance_to_party_leader = self._get_max_distance_to_party_leader(current_state)

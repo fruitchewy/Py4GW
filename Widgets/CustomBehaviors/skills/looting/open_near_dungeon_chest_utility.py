@@ -100,38 +100,25 @@ class OpenNearDungeonChestUtility(CustomSkillUtilityBase):
 
         # Use try-finally to ensure lock is always released
         try:
-            yield from custom_behavior_helpers.Helpers.wait_for(1000) # we must wait until the chest closing animation is finalized
-            # this must be done first, so beeing interrupted in that process is not an issue
-
-            if self.dedicated_debug: print(f"open_near_dungeon_chest_utility_ LOCK AQUIRED")
+            if constants.DEBUG: print(f"open_near_dungeon_chest_utility LOCK AQUIRED")
+            yield from custom_behavior_helpers.Helpers.wait_for(1500) # we must wait until the chest closing animation is finalized
             ActionQueueManager().ResetAllQueues()
-
-            # ----------- 1 WAIT FOR CHEST WINDOW TO OPEN PHASE ------------
-            if self.dedicated_debug: print(f"open_near_dungeon_chest_utility_ wait_for_chest_window_to_open")
-            is_chest_window_opened = yield from self.wait_for_chest_window_to_open(chest_agent_id)
-            print(f"open_near_dungeon_chest_utility_ wait_for_chest_window_to_open is_successful:{is_chest_window_opened}")
-            
-            if is_chest_window_opened == False:
-                self.opened_chest_agent_ids.add(chest_agent_id)
-                yield
-                return BehaviorResult.ACTION_SKIPPED
-            
-            # ----------- 2 SEND DIALOG PHASE ------------
-            if self.dedicated_debug: print(f"open_near_dungeon_chest_utility_ SendDialog")
-            Player.SendDialog(2)
-
-            # ----------- 3 SUCCESS ------------
+            Player.Interact(chest_agent_id, call_target=False)
+            yield from custom_behavior_helpers.Helpers.wait_for(1500)
+            if constants.DEBUG: print("CHEST_OPENED")
+            # Only mark chest as opened and publish the event upon successful interaction
+            if constants.DEBUG: print(f"RELEASE Lock key {lock_key}")
+            if constants.DEBUG: print(f"self.opened_chest_agent_ids {self.opened_chest_agent_ids}")
             self.opened_chest_agent_ids.add(chest_agent_id)
             yield from self.event_bus.publish(EventType.CHEST_OPENED, state, data=chest_agent_id)
-            print(f"open_near_dungeon_chest_utility_ CHEST_OPENED")
-            yield
+            CustomBehaviorParty().get_shared_lock_manager().release_lock(lock_key)
             return BehaviorResult.ACTION_PERFORMED
 
         except Exception as e:
-            print(f"ERROR in OpenNearChestUtility._execute: {type(e).__name__}: {e}")
+            if constants.DEBUG: print(f"ERROR in OpenNearDungeonChestUtility._execute: {type(e).__name__}: {e}")
+            if constants.DEBUG: print(f"Lock key: {lock_key}, Chest agent ID: {chest_agent_id}")
             import traceback
             traceback.print_exc()
-            yield
             return BehaviorResult.ACTION_SKIPPED
         finally:
             # Always release the lock, even if an exception occurs

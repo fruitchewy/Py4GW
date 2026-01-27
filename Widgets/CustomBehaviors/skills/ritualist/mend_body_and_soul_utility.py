@@ -50,8 +50,8 @@ class MendBodyAndSoulUtility(CustomSkillUtilityBase):
             within_range=Range.Spirit,
             condition=lambda agent_id: 
                 self.cure_effect_configuration.get_agent_id_predicate()(agent_id) and
-                custom_behavior_helpers.Resources.is_ally_under_specific_effect(agent_id, blind_skill_id) and
-                custom_behavior_helpers.Resources.is_ally_under_specific_effect(agent_id, crippled_skill_id),
+                (custom_behavior_helpers.Resources.is_ally_under_specific_effect(agent_id, blind_skill_id) or
+                custom_behavior_helpers.Resources.is_ally_under_specific_effect(agent_id, crippled_skill_id)),
             sort_key=(TargetingOrder.HP_ASC, TargetingOrder.DISTANCE_ASC))
         
         return targets[0] if len(targets) > 0 else None

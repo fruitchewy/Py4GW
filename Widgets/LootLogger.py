@@ -35,10 +35,13 @@ from Py4GWCoreLib import (
 # =============================================================================
 
 MODULE_NAME = "Loot Logger"
+module_name = "Loot Logger"  # Required for Widget Manager registration
 
-# Guild Wars item colors (RGBA) - using Color class for proper format
-COLOR_GOLD = Color(255, 204, 50, 255).to_tuple()
-COLOR_GREEN = Color(0, 255, 0, 255).to_tuple()
+# Guild Wars item colors (RGBA) - using normalized values for PyImGui
+# Gold: RGB(255, 204, 50) -> normalized (1.0, 0.8, 0.196, 1.0)
+# Green: RGB(0, 255, 0) -> normalized (0.0, 1.0, 0.0, 1.0)
+COLOR_GOLD = (1.0, 0.8, 0.196, 1.0)  # Normalized RGBA for gold/rare loot
+COLOR_GREEN = (0.0, 1.0, 0.0, 1.0)    # Normalized RGBA for green/unique loot
 
 # Modifier identifier for attribute requirements
 MODIFIER_REQUIREMENT = 10136
@@ -70,6 +73,7 @@ class WindowState:
         self.save_timer = Timer()
         self.save_timer.Start()
         self.first_run = True
+        self.needs_reposition = False  # Set when switching between modes
         self.x = self.ini.read_int(MODULE_NAME, "x", 100)
         self.y = self.ini.read_int(MODULE_NAME, "y", 100)
         self.collapsed = self.ini.read_bool(MODULE_NAME, "collapsed", False)
@@ -129,7 +133,12 @@ def strip_formatting_tags(text: str) -> str:
     """Remove GW formatting tags like <c=@ItemRare>...</c> from text."""
     if not text:
         return text
-    return re.sub(r"<[^>]+>", "", text)
+    # Keep stripping tags until none remain (handles nested tags)
+    prev = ""
+    while prev != text:
+        prev = text
+        text = re.sub(r"<[^>]+>", "", text)
+    return text
 
 
 def get_item_requirement(item_id: int) -> str:
@@ -183,6 +192,28 @@ def get_item_rarity(item_id: int) -> str:
 # =============================================================================
 
 
+def migrate_legacy_entries():
+    """Migrate old entries that are missing the rarity field."""
+    migrated = False
+    for entry in _loot.entries:
+        # Add missing rarity field (default to Gold for old entries)
+        if "rarity" not in entry:
+            entry["rarity"] = "Gold"
+            migrated = True
+        # Clean up any remaining formatting tags in item names
+        if "item_name" in entry and "<" in entry["item_name"]:
+            entry["item_name"] = strip_formatting_tags(entry["item_name"])
+            migrated = True
+    
+    if migrated:
+        _loot.pending_save = True
+        Py4GW.Console.Log(
+            MODULE_NAME,
+            "Migrated legacy loot entries",
+            Py4GW.Console.MessageType.Info,
+        )
+
+
 def load_loot_log():
     """Load loot entries from disk."""
     if not os.path.exists(PATH_LOOT_DATA):
@@ -193,6 +224,8 @@ def load_loot_log():
             data = json.load(f)
             _loot.entries = data.get("entries", [])
             _loot.last_seen_count = len(_loot.entries)
+            # Migrate old entries that might be missing fields
+            migrate_legacy_entries()
     except Exception as e:
         Py4GW.Console.Log(
             MODULE_NAME,
@@ -324,9 +357,11 @@ def scan_for_loot():
 
 def draw_minimized_widget():
     """Draw the minimized loot logger as a small icon with badge."""
-    if _window.first_run:
+    # Set position only when switching modes or first run
+    if _window.needs_reposition or _window.first_run:
         PyImGui.set_next_window_pos(_window.x, _window.y)
-        _window.first_run = False
+        _window.needs_reposition = False
+    PyImGui.set_next_window_size(MINIMIZED_SIZE, MINIMIZED_SIZE)
 
     # Window flags for minimized mode
     flags = (
@@ -336,15 +371,20 @@ def draw_minimized_widget():
         | PyImGui.WindowFlags.AlwaysAutoResize
     )
 
-    PyImGui.set_next_window_size(MINIMIZED_SIZE, MINIMIZED_SIZE)
-
     if PyImGui.begin(f"{MODULE_NAME}##minimized", flags):
         pos = PyImGui.get_window_pos()
 
+        # Add padding to prevent button clipping
+        PyImGui.set_cursor_pos(4, 4)
+        
         # Draw coins icon as button
         icon = IconsFontAwesome5.ICON_COINS
-        if PyImGui.button(f"{icon}##expand", MINIMIZED_SIZE - 8, MINIMIZED_SIZE - 8):
+        button_size = MINIMIZED_SIZE - 8
+        if PyImGui.button(f"{icon}##expand", button_size, button_size):
+            # Save current position before switching
+            _window.x, _window.y = int(pos[0]), int(pos[1])
             _window.minimized = False
+            _window.needs_reposition = True  # Tell expanded window to reposition
             _window.save_minimized()
             _loot.new_drops_count = 0
             _loot.last_seen_count = len(_loot.entries)
@@ -362,11 +402,12 @@ def draw_minimized_widget():
 
 def draw_expanded_widget():
     """Draw the full loot logger window."""
-    if _window.first_run:
+    if _window.first_run or _window.needs_reposition:
         PyImGui.set_next_window_size(500.0, 300.0)
         PyImGui.set_next_window_pos(_window.x, _window.y)
         PyImGui.set_next_window_collapsed(_window.collapsed, 0)
         _window.first_run = False
+        _window.needs_reposition = False
 
     is_open = PyImGui.begin(MODULE_NAME, 0)
     new_collapsed = PyImGui.is_window_collapsed()
@@ -375,7 +416,10 @@ def draw_expanded_widget():
     if is_open:
         # Header row with minimize button
         if PyImGui.button(f"{IconsFontAwesome5.ICON_MINUS_SQUARE}##minimize"):
+            # Save current position before switching
+            _window.x, _window.y = int(pos[0]), int(pos[1])
             _window.minimized = True
+            _window.needs_reposition = True  # Tell minimized window to reposition
             _window.save_minimized()
             _loot.new_drops_count = 0
             _loot.last_seen_count = len(_loot.entries)
@@ -416,7 +460,12 @@ def draw_expanded_widget():
                 # Item Name (colored by rarity)
                 PyImGui.table_next_column()
                 rarity = entry.get("rarity", "Gold")
-                color = COLOR_GREEN if rarity == "Green" else COLOR_GOLD
+                # Case-insensitive rarity check
+                if rarity and rarity.lower() == "green":
+                    color = COLOR_GREEN
+                else:
+                    # Gold, Rare, Yellow, or any other rarity
+                    color = COLOR_GOLD
                 PyImGui.text_colored(entry.get("item_name", "Unknown"), color)
 
                 # Requirement

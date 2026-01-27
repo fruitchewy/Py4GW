@@ -2,8 +2,6 @@ import math
 from tkinter.constants import N
 from typing import Any, Generator, override
 
-from HeroAI.cache_data import CacheData
-from HeroAI.types import PlayerStruct
 from Py4GWCoreLib import GLOBAL_CACHE, Party, Routines, Range, Player
 from Py4GWCoreLib.Py4GWcorelib import ActionQueueManager, ThrottledTimer, Utils
 from Widgets.CustomBehaviors.primitives.helpers import custom_behavior_helpers
@@ -52,11 +50,11 @@ class FollowFlagUtility(CustomSkillUtilityBase):
             return None
 
         party_number = GLOBAL_CACHE.Party.GetOwnPartyNumber()
-        cached_data = CacheData()
-        all_player_struct:list[PlayerStruct] = cached_data.HeroAI_vars.all_player_struct
-        if not all_player_struct[party_number].IsFlagged: return None
-        follow_x = all_player_struct[party_number].FlagPosX
-        follow_y = all_player_struct[party_number].FlagPosY
+        hero_ai_options = GLOBAL_CACHE.ShMem.GetGerHeroAIOptionsByPartyNumber(party_number)
+        if hero_ai_options is None or not hero_ai_options.IsFlagged:
+            return None
+        follow_x = hero_ai_options.FlagPosX
+        follow_y = hero_ai_options.FlagPosY
 
         distance_from_flag = Utils.Distance((follow_x, follow_y), Player.GetXY())
 
@@ -78,10 +76,11 @@ class FollowFlagUtility(CustomSkillUtilityBase):
             return BehaviorResult.ACTION_SKIPPED
 
         party_number = GLOBAL_CACHE.Party.GetOwnPartyNumber()
-        cached_data = CacheData()
-        all_player_struct:list[PlayerStruct] = cached_data.HeroAI_vars.all_player_struct
-        follow_x = all_player_struct[party_number].FlagPosX
-        follow_y = all_player_struct[party_number].FlagPosY
+        hero_ai_options = GLOBAL_CACHE.ShMem.GetGerHeroAIOptionsByPartyNumber(party_number)
+        if hero_ai_options is None:
+            return BehaviorResult.ACTION_SKIPPED
+        follow_x = hero_ai_options.FlagPosX
+        follow_y = hero_ai_options.FlagPosY
 
         position:tuple[float, float] = (follow_x, follow_y)
         ActionQueueManager().ResetQueue("ACTION")

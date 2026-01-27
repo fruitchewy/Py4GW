@@ -64,9 +64,9 @@ class HeroAiWrapping:
 
         return True
 
-    def _force_account_heroai_game_options(self, settings:Settings, cached_data:CacheData, accounts:list[AccountData]):
+    def _force_account_heroai_game_options(self, settings:Settings, accounts:list[AccountData]):
         """Initialize game options for each account"""
-        from HeroAI.constants import NUMBER_OF_SKILLS
+        from Py4GWCoreLib.GlobalCache.SharedMemory import SHMEM_NUMBER_OF_SKILLS
 
         for account in accounts:
             # Ensure account has a panel position entry
@@ -76,22 +76,7 @@ class HeroAiWrapping:
                 new_info.open = self._is_heroai_ui_visible
                 settings.HeroPanelPositions[account.AccountEmail] = new_info
 
-            # Initialize game options for this account's party position
-            party_pos = account.PartyPosition
-            if party_pos >= 0 and party_pos < len(cached_data.HeroAI_vars.all_game_option_struct):
-                # Update local cache
-                local_game_options = cached_data.HeroAI_vars.all_game_option_struct[party_pos]
-                local_game_options.Following = False
-                local_game_options.Avoidance = False
-                local_game_options.Looting = False
-                local_game_options.Targeting = False
-                local_game_options.Combat = False
-
-                # Set all skills to active if not already initialized
-                for i in range(NUMBER_OF_SKILLS):
-                    local_game_options.Skills[i].Active = True
-
-            # Also update shared memory (HeroAIOptionStruct)
+            # Update shared memory (HeroAIOptionStruct)
             hero_ai_options = GLOBAL_CACHE.ShMem.GetHeroAIOptions(account.AccountEmail)
             if hero_ai_options is not None:
                 hero_ai_options.Following = False
@@ -99,6 +84,10 @@ class HeroAiWrapping:
                 hero_ai_options.Looting = False
                 hero_ai_options.Targeting = False
                 hero_ai_options.Combat = False
+
+                # Set all skills to active if not already initialized
+                for i in range(SHMEM_NUMBER_OF_SKILLS):
+                    hero_ai_options.Skills[i] = True
 
     def act(self):
         """
@@ -119,16 +108,11 @@ class HeroAiWrapping:
         accounts:list[AccountData] = GLOBAL_CACHE.ShMem.GetAllAccountData()
 
         # Force game options for each account (in shared memory) BEFORE syncing local cache
-        self._force_account_heroai_game_options(self._settings, self._cached_data, accounts)
+        self._force_account_heroai_game_options(self._settings, accounts)
 
-        # Now sync local cache from shared memory (will read the forced values)
-        from HeroAI.game_option import UpdateGameOptions
-        UpdateGameOptions(self._cached_data)
-
-        # Update combat and game options from local cache
+        # Update cache from shared memory and handle combat
         self._cached_data.Update()
         self._cached_data.UpdateCombat()
-        self._cached_data.UpdateGameOptions()
 
         # ----------------- MANAGE HERO AI UI -----------------
         if not self._is_heroai_ui_visible: return
