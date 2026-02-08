@@ -113,7 +113,7 @@ This does NOT change what data is collected or how it's materialized — the Age
 already handles that. What it changes is: **if any read returns a default because the agent
 went invalid, the entire batch is discarded and the previous frame's data stays in shmem.**
 
-The previous frame's data is stale by one frame (16-66ms) but at least it's internally
+The previous frame's data is stale by one frame (~16ms) but at least it's internally
 consistent. A reader seeing last frame's coherent snapshot is strictly better than seeing
 this frame's half-valid snapshot.
 

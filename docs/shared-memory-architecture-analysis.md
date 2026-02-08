@@ -145,7 +145,7 @@ beyond a single frame.
 **Note on torn reads:** Cross-process readers can see a mix of fields from two consecutive
 frames (e.g., position from frame N, health from frame N+1) because writes are not atomic.
 This is a known property of the architecture and is **not considered an instability source**.
-Sub-frame data inconsistency is acceptable given the update rate (~15 FPS) and the tolerance
+Sub-frame data inconsistency is acceptable given the update rate (~60 FPS) and the tolerance
 of downstream consumers (HeroAI, bots). The live-view behavior of reader accessors — where
 each field access reads the latest value from shared memory — is by design and is actually
 desirable: readers always get the freshest data.
@@ -311,7 +311,7 @@ def _set_agent_data(index):
 ```
 
 **Tradeoffs:**
-- On failure, the previous frame's data stays in shmem. Stale by one frame (16-66ms) but
+- On failure, the previous frame's data stays in shmem. Stale by one frame (~16ms) but
   internally consistent — strictly better than a half-valid frame.
 - Collapses 60+ native lookups into 1, reducing per-frame native API overhead significantly.
 - The single `living` reference is still a native pointer held briefly within a single
@@ -552,7 +552,7 @@ rename mechanically.
   naturally implements 1A's all-or-nothing pattern internally).
 - Immutable snapshots are convenient for consumers that want to compare across frames or
   pass data between functions without worrying about mutation.
-- Per-read allocation cost (Python dataclass creation). For 64 slots at 15-60 FPS this is
+- Per-read allocation cost (Python dataclass creation). For 64 slots at ~60 FPS this is
   negligible.
 - Biggest API surface change of the Option 2 proposals, but the most structured.
 
@@ -719,7 +719,7 @@ accessing the same database file directly — no broker/server process is requir
 8 interpreter environments would open its own `sqlite3.connect()` to the same file path.
 WAL mode allows concurrent readers while one writer holds the write lock. Writers serialize
 via SQLite's internal file locking (the WAL and `-shm` files). In practice, with 8 clients
-each writing once per frame (~15 FPS) and reads being non-blocking in WAL mode, contention
+each writing once per frame (~60 FPS) and reads being non-blocking in WAL mode, contention
 would be low. The main caveat is that **all 8 processes must see the same filesystem path**
 (they do, since they're on the same machine) and that write transactions should be kept
 short to minimize lock hold time. If write contention becomes a bottleneck under load, the
@@ -728,7 +728,7 @@ significant complexity and is unlikely to be necessary at 8 clients.
 
 **Disadvantages:**
 - Higher per-operation latency than raw shared memory (~0.1-1ms per transaction vs ~1us for
-  a memcpy). At 15 FPS with 8 clients this is likely fine, but needs measurement.
+  a memcpy). At ~60 FPS with 8 clients this needs measurement — 480 write transactions/sec.
 - Requires file system access (temp directory or configurable path).
 - Less "real-time" feel — inherent write-commit-read pipeline adds latency.
 - Write serialization under WAL means only one process can write at a time. At 8 clients
