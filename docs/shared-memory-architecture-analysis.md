@@ -4,10 +4,11 @@
 
 1. [Current Architecture Summary](#current-architecture-summary)
 2. [Identified Instability Sources](#identified-instability-sources)
-3. [Option 1: Incremental Improvements (Same API)](#option-1-incremental-improvements-same-api)
-4. [Option 2: Rearchitecture (Compatible Concepts, New API)](#option-2-rearchitecture-compatible-concepts-new-api)
-5. [Option 3: Alternative Approaches](#option-3-alternative-approaches)
-6. [Comparison Matrix](#comparison-matrix)
+3. [Options Overview](#options-overview)
+4. [Option 1: Incremental Improvements (Same API)](#option-1-incremental-improvements-same-api)
+5. [Option 2: Rearchitecture (Compatible Concepts, New API)](#option-2-rearchitecture-compatible-concepts-new-api)
+6. [Option 3: Alternative Approaches](#option-3-alternative-approaches)
+7. [Comparison Matrix](#comparison-matrix)
 
 ---
 
@@ -97,6 +98,42 @@ Inside `SetPlayerData`, the manager:
 | SharedMem Monitor (`Widgets/Coding/Debug/`) | Read-only debug display |
 | aC_Scripts (`Sources/aC_Scripts/`) | Separate `SharedState` implementation with file-based locking |
 
+### Arbitrary User-Defined Shared Memory Segments
+
+Beyond the core `Py4GW_Shared_Mem` segment, **widgets and bots can reserve their own
+independent shared memory blocks**. This is an established pattern in the codebase — not an
+edge case. Known examples:
+
+| Segment Name | Creator | Size | Purpose | Sync Strategy |
+|---|---|---|---|---|
+| `CustomBehaviorWidgetMemoryManager` | `Sources/oazix/CustomBehaviors/` | ~4.3KB | Party follow/flag/teambuild config + cooperative locks | Application-level locks with TTL |
+| `mywidgets_sync` (default, overridable) | `Sources/aC_Scripts/aC_api/shared_state_ctypes.py` | ~296B | Dialog sync, multi-client widget state | `fcntl.flock()` file-based locking |
+| `GW_NEXUS_SMA` | Legacy (`Legacy code and tests/`) | Variable | Agent/player data sync | None (deprecated) |
+
+Each follows the same singleton + create-or-attach pattern as the core system:
+
+```python
+try:
+    self.shm = shared_memory.SharedMemory(name=custom_name)
+except FileNotFoundError:
+    self.shm = shared_memory.SharedMemory(name=custom_name, create=True, size=size)
+```
+
+Key characteristics of this pattern:
+- **No central registry.** There is no system-level catalog of which segments exist, who
+  owns them, or what schema they use. Each segment is discovered by name convention.
+- **No shared lifecycle management.** None of the custom segments call `shm.unlink()`.
+  Segments persist until the OS cleans them up on system restart.
+- **Inconsistent synchronization.** The core system uses timestamp-based liveness. Custom-
+  Behaviors uses application-level TTL locks in shared memory. aC_Scripts uses OS file
+  locks. Each segment has its own (or no) approach.
+- **Independent schemas.** Each segment defines its own ctypes structures. There is no
+  versioning or compatibility checking — if a widget is updated to change its struct layout,
+  a stale process attached to the old layout will read garbage.
+- **Any widget or bot can create new ones.** The pattern is simple enough that new scripts
+  naturally create their own segments when they need cross-client coordination beyond what
+  the core message system provides.
+
 ---
 
 ## Identified Instability Sources
@@ -154,6 +191,60 @@ native pointers. If the agent becomes invalid partway through, some fields get w
 valid data and some with garbage or trigger access violations. This is the most likely direct
 cause of the native crashes — the sheer number of individual native reads per frame creates
 a large window for the game to invalidate the underlying memory.
+
+### I-7. Unmanaged Segment Proliferation
+
+Widgets and bots create arbitrary shared memory segments with no central registry, no schema
+versioning, and no lifecycle management. This creates several compounding issues:
+
+- **Orphaned segments.** No segment calls `shm.unlink()`, so crashed or updated processes
+  leave stale segments in the OS. A new process attaches to the old segment and interprets
+  bytes under a potentially different struct layout.
+- **Schema drift.** If `CustomBehaviorWidgetStruct` adds a field, any client still running
+  the old code reads past the end of the old layout into whatever follows in memory. There
+  is no version header or size check.
+- **Invisible coupling.** Two subsystems that independently create segments with the same
+  name will silently collide. There is no namespace or prefix convention enforced at the
+  framework level.
+- **No observability.** The SharedMem Monitor widget only knows about the core
+  `Py4GW_Shared_Mem` segment. Custom segments are invisible to debugging tools unless
+  each one builds its own monitor.
+
+---
+
+## Options Overview
+
+Before diving into the details, here is a brief summary of each option:
+
+**Option 1 — Incremental improvements (same API):**
+
+| Option | Approach |
+|--------|----------|
+| **1A** | Collect all native game data into a Python snapshot before writing to shmem, reducing the stale-pointer crash window |
+| **1B** | Add a seqlock generation counter to each slot so readers can detect torn/in-progress writes |
+| **1C** | Re-enable the disabled `UpdateTimeouts()` to clean up stale slots from crashed clients |
+| **1D** | Return cloned copies from all read accessors instead of live pointers into the shared buffer |
+| **1E** | Replace separate Active/Running bools with a single atomic state word for messages |
+| **1F** | Add a lightweight segment registry so custom segments are discoverable and version-checked |
+
+**Option 2 — Rearchitecture (compatible concepts, new API):**
+
+| Option | Approach |
+|--------|----------|
+| **2A** | Double-buffer each player slot (A/B copies with atomic flip) to eliminate torn reads entirely |
+| **2B** | Replace the flat message array with per-receiver ring buffers and sequence-number cursors |
+| **2C** | Split the monolithic segment into three independent segments (state, commands, config) with per-segment sync strategies |
+| **2D** | Wrap shared memory behind a typed accessor layer that returns immutable Python dataclass snapshots |
+| **2E** | Provide a managed segment factory so widgets/bots get lifecycle, versioning, and registry for free |
+
+**Option 3 — Alternative approaches:**
+
+| Option | Approach |
+|--------|----------|
+| **3A** | Use SQLite in WAL mode as the shared state store — ACID transactions, crash recovery, SQL queries |
+| **3B** | Use a plain mmap'd file with OS advisory locking — crash-persistent, inspectable with standard tools |
+| **3C** | Keep shmem for high-frequency state but move commands to localhost UDP multicast for natural pub/sub |
+| **3D** | Use named pipes / Unix domain sockets for reliable ordered per-receiver command delivery |
 
 ---
 
@@ -277,6 +368,46 @@ on the single word instead of setting two separate fields.
 - Messages become slightly easier to reason about.
 - Does not provide true CAS on platforms without `lock cmpxchg`, but reduces the race window
   to a single word write which is effectively atomic on x86.
+
+### 1F. Lightweight Segment Registry
+
+**Problem addressed:** I-7 (unmanaged segment proliferation)
+
+Add a small "registry" shared memory segment (or a reserved section at the end of
+`Py4GW_Shared_Mem`) that tracks all active custom segments by name, owning process,
+struct size, and a schema version number. When a widget creates a custom segment, it
+registers it. When another process attaches, it checks the registry for size/version
+mismatches before overlaying its struct.
+
+```python
+class SegmentRegistryEntry(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Name", c_wchar * 64),
+        ("SchemaVersion", c_uint),
+        ("Size", c_uint),
+        ("OwnerPID", c_uint),
+        ("CreatedAt", c_uint),
+    ]
+
+# In the core manager:
+def register_segment(self, name: str, version: int, size: int):
+    ...
+
+def attach_segment(self, name: str, expected_version: int, expected_size: int):
+    entry = self._find_registry_entry(name)
+    if entry and (entry.SchemaVersion != expected_version or entry.Size != expected_size):
+        raise SchemaMismatchError(f"Segment '{name}' v{entry.SchemaVersion} "
+                                   f"(size {entry.Size}) != expected v{expected_version}")
+    ...
+```
+
+**Tradeoffs:**
+- Small addition — a fixed-size registry array (e.g., 32 entries) in a known location.
+- Gives the SharedMem Monitor widget visibility into all custom segments.
+- Does not force any particular sync strategy on custom segments — just tracks them.
+- Requires all segment creators to opt in (call `register_segment`). Existing code that
+  doesn't register still works, just isn't visible in the registry.
 
 ---
 
@@ -477,6 +608,93 @@ rename mechanically.
 - Writers still need the snapshot-before-write pattern for native data.
 - Biggest API surface change of the Option 2 proposals, but the most robust.
 
+### 2E. Managed Segment Factory for Widgets/Bots
+
+**Core idea:** Instead of letting each widget/bot manually create shared memory segments
+with `shared_memory.SharedMemory(name=..., create=True, ...)`, provide a framework-level
+`SegmentFactory` that handles creation, attachment, schema versioning, lifecycle cleanup,
+and registry in a uniform way.
+
+```python
+class SegmentFactory:
+    """Framework-provided factory for creating managed shared memory segments."""
+
+    def create_or_attach(self,
+                         name: str,
+                         struct_type: type[Structure],
+                         schema_version: int = 1,
+                         on_first_init: callable = None) -> ManagedSegment:
+        """
+        Create or attach to a named shared memory segment.
+        - Registers in the central registry (visible to monitor tools).
+        - Validates schema version and size on attach.
+        - Calls on_first_init(struct) only when creating for the first time.
+        - Tracks owning PID for orphan detection.
+        """
+        size = sizeof(struct_type) + sizeof(SegmentHeader)
+        try:
+            shm = shared_memory.SharedMemory(name=name)
+            header = SegmentHeader.from_buffer(shm.buf)
+            if header.SchemaVersion != schema_version:
+                raise SchemaMismatchError(...)
+            if header.Size != sizeof(struct_type):
+                raise SchemaMismatchError(...)
+        except FileNotFoundError:
+            shm = shared_memory.SharedMemory(name=name, create=True, size=size)
+            header = SegmentHeader.from_buffer(shm.buf)
+            header.SchemaVersion = schema_version
+            header.Size = sizeof(struct_type)
+            header.CreatorPID = os.getpid()
+            if on_first_init:
+                data = struct_type.from_buffer(shm.buf, sizeof(SegmentHeader))
+                on_first_init(data)
+
+        self._register(name, schema_version, sizeof(struct_type))
+        return ManagedSegment(shm, struct_type)
+
+class ManagedSegment:
+    """Wrapper providing typed access and cleanup."""
+    def get_struct(self) -> Structure:
+        return self._struct_type.from_buffer(
+            self._shm.buf, sizeof(SegmentHeader))
+
+    def close(self):
+        self._shm.close()
+        # Optionally unlink if we are the creator
+```
+
+**Usage by a widget:**
+```python
+# Before (manual, unmanaged):
+shm = shared_memory.SharedMemory(name="my_widget_sync", create=True, size=sizeof(MyStruct))
+data = MyStruct.from_buffer(shm.buf)
+
+# After (managed):
+seg = GLOBAL_CACHE.SegmentFactory.create_or_attach(
+    name="my_widget_sync",
+    struct_type=MyStruct,
+    schema_version=2,
+    on_first_init=lambda s: reset_defaults(s),
+)
+data = seg.get_struct()
+```
+
+**Migration path:** CustomBehaviorWidgetMemoryManager and SharedState would be refactored
+to use `SegmentFactory.create_or_attach()` internally, replacing their bespoke create-or-
+attach code. Their public APIs stay the same — the change is in how the segment is obtained.
+New widgets/bots would use the factory from the start.
+
+**Tradeoffs:**
+- Solves orphan segments (factory tracks creator PID, can detect and clean up).
+- Solves schema drift (version + size checked on every attach).
+- Solves observability (all segments registered, visible to monitor tools).
+- Does NOT dictate synchronization strategy — each segment can still use whatever sync
+  approach fits (locks, seqlocks, timestamps, none).
+- Adds a small framework dependency — widgets that want raw `shared_memory` access can
+  still use it, but lose the management benefits.
+- The `SegmentHeader` prefix means existing segment layouts are not wire-compatible (one-time
+  migration per segment).
+
 ---
 
 ## Option 3: Alternative Approaches
@@ -548,11 +766,25 @@ class StateStore:
 - No manual memory layout management, no ctypes, no struct packing.
 - Complex data (buff lists, skill arrays) can be stored as JSON columns.
 
+**Multi-process access model:** SQLite in WAL mode **does** support multiple processes
+accessing the same database file directly — no broker/server process is required. Each of the
+8 interpreter environments would open its own `sqlite3.connect()` to the same file path.
+WAL mode allows concurrent readers while one writer holds the write lock. Writers serialize
+via SQLite's internal file locking (the WAL and `-shm` files). In practice, with 8 clients
+each writing once per frame (~15 FPS) and reads being non-blocking in WAL mode, contention
+would be low. The main caveat is that **all 8 processes must see the same filesystem path**
+(they do, since they're on the same machine) and that write transactions should be kept
+short to minimize lock hold time. If write contention becomes a bottleneck under load, the
+alternative is a single writer process that other clients communicate with, but this adds
+significant complexity and is unlikely to be necessary at 8 clients.
+
 **Disadvantages:**
 - Higher per-operation latency than raw shared memory (~0.1-1ms per transaction vs ~1us for
-  a memcpy). At 15 FPS with 64 slots this is likely fine, but needs measurement.
+  a memcpy). At 15 FPS with 8 clients this is likely fine, but needs measurement.
 - Requires file system access (temp directory or configurable path).
 - Less "real-time" feel — inherent write-commit-read pipeline adds latency.
+- Write serialization under WAL means only one process can write at a time. At 8 clients
+  this is manageable, but write-heavy workloads could see occasional blocking (~ms scale).
 - Debugging is easier (can open the DB with any SQLite tool) but monitoring widgets would
   need rewriting.
 
@@ -714,35 +946,41 @@ class CommandSender:
 
 ## Comparison Matrix
 
-| Criterion | 1A-E (Incremental) | 2A-D (Rearchitecture) | 3A (SQLite) | 3B (mmap+lock) | 3C (UDP hybrid) | 3D (Pipes) |
+| Criterion | 1A-F (Incremental) | 2A-E (Rearchitecture) | 3A (SQLite) | 3B (mmap+lock) | 3C (UDP hybrid) | 3D (Pipes) |
 |-----------|--------------------|-----------------------|-------------|-----------------|-----------------|------------|
 | **Eliminates torn reads** | Partial (1B) | Yes (2A, 2D) | Yes | Yes | N/A (state stays in shmem) | N/A |
 | **Eliminates stale pointer crashes** | Partial (1A) | Partial (still need 1A pattern) | Same (need snapshot) | Same (need snapshot) | Same (need snapshot) | Same (need snapshot) |
 | **Message race safety** | Improved (1E) | Yes (2B) | Yes | Depends on impl | Yes | Yes |
 | **Crash recovery** | No | No | Yes (WAL) | Yes (file persists) | No | No |
+| **Custom segment management** | Partial (1F registry) | Yes (2E factory) | N/A (single DB) | Per-file | N/A | N/A |
 | **Migration effort** | Low | Medium | High | Medium | Medium | Medium-High |
 | **Runtime overhead** | ~Same | ~Same (+alloc) | Higher (+IO) | ~Same (+lock) | ~Same (+network) | ~Same (+IO) |
-| **Debugging ease** | Same | Better (typed API) | Best (SQL queries) | Good (hex dump) | Harder | Harder |
+| **Debugging ease** | Better (1F) | Better (typed API + registry) | Best (SQL queries) | Good (hex dump) | Harder | Harder |
 | **Broadcast support** | Same (loop) | Better (2B ring) | Same (query) | Same (loop) | Best (multicast) | Worst (N sends) |
-| **Schema evolution** | Hard (struct layout) | Medium (versioned) | Easy (ALTER TABLE) | Hard (struct) | Easy (JSON) | Medium |
+| **Schema evolution** | Partial (1F version) | Good (2E versioned) | Easy (ALTER TABLE) | Hard (struct) | Easy (JSON) | Medium |
 | **Windows compat** | Same | Same | Same | Needs compat | Same | Needs compat |
 
 ### Recommended Approach
 
-**Short term (lowest risk, highest impact):** Implement **1A** (snapshot-before-write) and
-**1D** (return clones). These two changes address the most dangerous instability (stale native
-pointers causing crashes) and the most common reader-side surprise (live pointers into shmem),
-without changing any API signatures.
+**Short term (lowest risk, highest impact):** Implement **1A** (snapshot-before-write),
+**1D** (return clones), and **1F** (segment registry). The first two address the most
+dangerous instability (stale native pointers causing crashes) and the most common reader-side
+surprise (live pointers into shmem), without changing any API signatures. 1F provides
+immediate observability into the custom segment ecosystem with minimal effort.
 
-**Medium term:** Implement **2D** (typed accessor layer with dataclass snapshots) on top of
-the existing shared memory segment. This can be done as a new module that wraps the existing
+**Medium term:** Implement **2D** (typed accessor layer with dataclass snapshots) and **2E**
+(managed segment factory) together. 2D can be a new module that wraps the existing
 `Py4GWSharedMemoryManager`, providing a clean API while the underlying storage stays the same.
-Migrate consumers one at a time.
+2E gives widgets/bots a standardized way to create custom segments with versioning, lifecycle
+management, and registry — replacing the current ad-hoc pattern. Migrate consumers one at a
+time.
 
 **Long term (if the system continues to grow):** Move to **2C** (separated segments) with
 **2B** (ring buffer messages). The separated segments allow independent evolution of state,
 commands, and config. The ring buffer eliminates the message queue races entirely. If query
-capability becomes important, consider **3A** (SQLite) for the state segment specifically.
+capability becomes important, consider **3A** (SQLite) for the state segment specifically —
+it naturally solves the custom segment problem too, since any widget can create a table
+instead of a segment.
 
 The stale native pointer problem (the primary crash source) is **orthogonal to the IPC
 mechanism** — it must be solved at the data collection layer (1A pattern) regardless of which
