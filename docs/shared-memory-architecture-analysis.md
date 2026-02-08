@@ -138,59 +138,74 @@ Key characteristics of this pattern:
 
 ## Identified Instability Sources
 
-The primary instability manifests as **native client crashes** caused by accessing stale game
-memory pointers. This section catalogs the architectural patterns that contribute to this.
+This section catalogs the architectural patterns that contribute to actual instability —
+meaning crashes, lost messages, stale slot accumulation, or behavioral errors that persist
+beyond a single frame.
 
-### I-1. Stale Native Pointer Cache
+**Note on torn reads:** Cross-process readers can see a mix of fields from two consecutive
+frames (e.g., position from frame N, health from frame N+1) because writes are not atomic.
+This is a known property of the architecture and is **not considered an instability source**.
+Sub-frame data inconsistency is acceptable given the update rate (~15 FPS) and the tolerance
+of downstream consumers (HeroAI, bots). The live-view behavior of reader accessors — where
+each field access reads the latest value from shared memory — is by design and is actually
+desirable: readers always get the freshest data.
 
-`SharedMemory.py` caches `self.agent_instance` (an `AgentStruct` pointing into native game
-memory) across frames. The validation/refresh logic at lines 1015-1023 has a gap: between
-checking `agent_instance` validity and actually using it in the `_set_*_data()` helpers, the
-game can free or reallocate the underlying memory. The agent pointer is also refreshed on a
-63ms throttle timer, meaning it can be up to 63ms stale.
+### I-1. Half-Valid Frames From Mid-Batch Agent Invalidation
 
-Similarly, `self.effects_instance`, `self.party_instance`, and `self._title_instances` are
-all cached native objects that may point to freed game memory if the game state changes
-(map transition, party change, cinematic).
+The Agent API already handles stale pointers — `Agent.GetHealth(agent_id)` returns `0.0` if
+the agent is invalid, not a crash. **The shared memory struct never holds native pointers.**
+It holds materialized Python values (`c_float`, `c_uint`, `c_bool`).
 
-### I-2. No Atomic Multi-Field Writes
+The actual problem is **batch atomicity**: `_set_agent_data` makes 60+ individual API calls
+in sequence, and if the agent becomes invalid partway through, some calls return real data
+and some return safe defaults. The batch is committed anyway, producing a half-valid frame:
 
-When `SetPlayerData` writes 50+ fields to AgentData, each field is a separate memory store.
-A reader on another process can observe a half-written record — e.g., position from frame N
-but health from frame N+1. While this is unlikely to crash directly, it creates inconsistent
-snapshots that downstream logic (HeroAI targeting, following) may act on incorrectly.
+```
+agent_data.Health = Agent.GetHealth(agent_id)     # → 0.75 (agent still valid)
+agent_data.MaxHealth = Agent.GetMaxHealth(agent_id) # → 480
+# ── agent becomes invalid here (map transition, despawn) ──
+agent_data.XYZ[0] = Agent.GetXYZ(agent_id)[0]    # → 0.0 (returns default)
+agent_data.Is_Alive = Agent.IsAlive(agent_id)     # → False (returns default)
+```
 
-### I-3. Readers Get Live Pointers Into Shared Memory
+Result: slot contains Health=0.75, MaxHealth=480, Position=(0,0,0), Is_Alive=False — a
+character that appears to have health but is at the origin and flagged dead. HeroAI reads
+this and may act on the contradictory state.
 
-Methods like `GetAllActivePlayers()`, `GetAccountDataFromEmail()`, etc. return references
-directly into the shared memory buffer — not copies. The caller holds a live ctypes pointer
-to the shared segment. If the owning process resets that slot (via `ResetPlayerData`) or the
-slot times out and gets reused, the reader is now looking at data from a different entity.
+Additionally, each of the 60+ calls independently re-validates the agent through the full
+`IsValid() → GetAgentByID() → GetLivingAgentByID()` chain — 60+ redundant native lookups
+per frame for the same agent_id.
 
-`AccountData.clone()` exists (using `memmove`) but is not called by default in any of the
-accessor methods.
+See [Option 1A Developer Commentary](option-1a-developer-commentary.md) for the full trace.
 
-### I-4. Disabled Timeout Cleanup
+### I-2. Cached Native Context Objects
+
+`SharedMemory.py` caches `self.agent_instance`, `self.effects_instance`,
+`self.party_instance`, and `self._title_instances` — these are live ctypes structs pointing
+into native game memory, held across frames. `self.agent_instance` is refreshed on a 63ms
+throttle timer; the others on 150ms timers or never.
+
+The validation at lines 1015-1018 (`self.agent_instance.GetAsAgentLiving()`) itself
+dereferences native memory — if the game freed that agent between frames, this check can
+crash before it gets a chance to null-out the reference.
+
+The hero/pet write paths (`SetHeroData`, `SetPetData`) also fetch fresh `AgentStruct`
+references via `Agent.GetAgentByID()` and then read fields like `.pos.x`,
+`.rotation_angle` directly from native memory without re-checking validity between reads.
+
+### I-3. Disabled Timeout Cleanup
 
 `UpdateTimeouts()` (line 2017-2028) has an immediate `return` at line 2018, making the
 entire timeout cleanup dead code. Stale slots from crashed clients accumulate and are only
 reclaimed opportunistically by `FindEmptySlot()` when it runs out of clean slots.
 
-### I-5. Message Queue Races
+### I-4. Message Queue Races
 
 The message system uses a scan-for-first-inactive-slot pattern with no CAS (compare-and-swap)
 or lock. Two senders targeting different receivers can race on the same message slot. The
 `Active`/`Running` flags are separate `c_bool` fields — not an atomic state word — so a
-reader could see `Active=True, Running=False` momentarily during `MarkMessageAsFinished`.
-
-### I-6. Large Per-Frame Native API Surface
-
-Each `SetPlayerData` call makes 60+ individual native API calls (`Agent.GetXYZ()`,
-`Agent.GetHealth()`, `Agent.IsBleeding()`, etc.), each of which independently dereferences
-native pointers. If the agent becomes invalid partway through, some fields get written with
-valid data and some with garbage or trigger access violations. This is the most likely direct
-cause of the native crashes — the sheer number of individual native reads per frame creates
-a large window for the game to invalidate the underlying memory.
+transient inconsistency during `MarkMessageAsFinished` could cause a message to be picked
+up twice or lost.
 
 ### I-7. Unmanaged Segment Proliferation
 
@@ -220,22 +235,25 @@ Before diving into the details, here is a brief summary of each option:
 
 | Option | Approach |
 |--------|----------|
-| **1A** | Collect all native game data into a Python snapshot before writing to shmem, reducing the stale-pointer crash window |
-| **1B** | Add a seqlock generation counter to each slot so readers can detect torn/in-progress writes |
+| **1A** | All-or-nothing batch writes: collect all native data first, skip the entire write if the agent goes invalid mid-batch (prevents half-valid frames) |
 | **1C** | Re-enable the disabled `UpdateTimeouts()` to clean up stale slots from crashed clients |
-| **1D** | Return cloned copies from all read accessors instead of live pointers into the shared buffer |
 | **1E** | Replace separate Active/Running bools with a single atomic state word for messages |
 | **1F** | Add a lightweight segment registry so custom segments are discoverable and version-checked |
+
+*Removed from consideration:* **1B** (seqlock generation counter) and **1D** (return clones)
+addressed torn reads, which are acceptable sub-frame noise — not an instability source.
 
 **Option 2 — Rearchitecture (compatible concepts, new API):**
 
 | Option | Approach |
 |--------|----------|
-| **2A** | Double-buffer each player slot (A/B copies with atomic flip) to eliminate torn reads entirely |
 | **2B** | Replace the flat message array with per-receiver ring buffers and sequence-number cursors |
 | **2C** | Split the monolithic segment into three independent segments (state, commands, config) with per-segment sync strategies |
 | **2D** | Wrap shared memory behind a typed accessor layer that returns immutable Python dataclass snapshots |
 | **2E** | Provide a managed segment factory so widgets/bots get lifecycle, versioning, and registry for free |
+
+*Removed from consideration:* **2A** (double-buffered slots) existed solely to eliminate torn
+reads. Since sub-frame inconsistency is acceptable, the 2x memory cost has no justification.
 
 **Option 3 — Alternative approaches:**
 
@@ -253,66 +271,55 @@ Before diving into the details, here is a brief summary of each option:
 These changes preserve the existing `Py4GWSharedMemoryManager` API surface. Callers would
 not need to change their code.
 
-### 1A. Snapshot-Before-Write Pattern
+### 1A. All-or-Nothing Batch Writes
 
-**Problem addressed:** I-1, I-6 (stale pointers, large native API surface)
+**Problem addressed:** I-1 (half-valid frames from mid-batch agent invalidation)
 
-Instead of making 60+ individual native API calls that each dereference the agent pointer,
-collect all native data into a local Python dict/dataclass *first*, then bulk-write it to
-shared memory. This collapses the "window of vulnerability" from the entire write sequence
-down to the single native snapshot call.
+The Agent API already materializes values and returns safe defaults when agents are invalid.
+The shared memory struct never holds native pointers. The real problem is that 60+ individual
+API calls run in sequence with no all-or-nothing boundary — if the agent goes invalid
+midway, the batch is committed anyway with a mix of real values and zeroed defaults.
+
+The fix is batch discipline: **gate the entire batch on a single validity check, and discard
+the batch if any read fails.** Additionally, collapse the 60+ redundant per-call agent
+lookups into a single lookup.
 
 ```python
-# Conceptual change inside SetPlayerData:
-def _snapshot_native_data(agent_id) -> dict | None:
-    """One try/except boundary around ALL native reads."""
-    if not Agent.IsValid(agent_id):
-        return None
+def _set_agent_data(index):
+    agent_id = Player.GetAgentID()
+    living = Agent.GetLivingAgentByID(agent_id)
+    if living is None:
+        return  # skip entirely — keep last good frame in shmem
+
     try:
-        snapshot = {}
-        snapshot['xyz'] = Agent.GetXYZ(agent_id)
-        snapshot['health'] = Agent.GetHealth(agent_id)
-        # ... all other reads ...
-        return snapshot
+        # All reads from the same struct — one lookup, not 60
+        health = living.hp
+        max_health = living.max_hp
+        energy = living.energy
+        xyz = (living.pos.x, living.pos.y, living.z)
+        is_bleeding = living.is_bleeding
+        # ... etc ...
     except Exception:
-        return None  # Agent became invalid mid-read
+        return  # agent went invalid mid-batch — discard
 
-def _write_snapshot_to_shmem(index, snapshot):
-    """Pure ctypes writes, no native calls."""
-    player = self.GetStruct().AccountData[index]
-    player.PlayerPosX = snapshot['xyz'][0]
-    # ...
+    # Only commit if ALL reads succeeded
+    agent_data = self.GetStruct().AccountData[index].PlayerData.AgentData
+    agent_data.Health = health
+    agent_data.MaxHealth = max_health
+    agent_data.XYZ[0] = xyz[0]
+    # ... etc ...
 ```
 
 **Tradeoffs:**
-- Does not eliminate the race window entirely, but makes it much smaller.
-- Adds one frame of latency (snapshot then write).
-- If the snapshot fails partway, you skip the entire write rather than leaving a half-written
-  record.
-- No API change — `SetPlayerData(email)` still works identically.
+- On failure, the previous frame's data stays in shmem. Stale by one frame (16-66ms) but
+  internally consistent — strictly better than a half-valid frame.
+- Collapses 60+ native lookups into 1, reducing per-frame native API overhead significantly.
+- The single `living` reference is still a native pointer held briefly within a single
+  function call — not cached across frames.
+- No API change — `SetPlayerData(email)` works identically.
 
-### 1B. Generation Counter for Readers
-
-**Problem addressed:** I-2, I-3 (torn reads, stale references)
-
-Add a `WriteGeneration` (uint32) field to `AccountData`. The writer increments it before
-starting a write and again after finishing. Readers check: if the generation is odd, a write
-is in progress and the data is potentially torn — retry or skip. If the generation changed
-between the start and end of a read, the data was modified during the read.
-
-```
-# In AccountData:
-("WriteGeneration", c_uint),  # Even = stable, odd = write-in-progress
-```
-
-This is a standard seqlock pattern adapted for single-writer-multiple-reader shared memory.
-
-**Tradeoffs:**
-- Requires adding one field to the structure (breaking existing shared memory layout — but
-  this is a one-time migration).
-- Readers need a small wrapper: `with shmem.consistent_read(index) as data:` that retries
-  on torn reads.
-- No change to the write-side API.
+See [Option 1A Developer Commentary](option-1a-developer-commentary.md) for the full trace
+of the current data flow and why "snapshot before write" was a misleading framing.
 
 ### 1C. Enable and Fix UpdateTimeouts
 
@@ -339,21 +346,6 @@ def UpdateTimeouts(self):
 - Simple fix.
 - Need to ensure all clients run `UpdateTimeouts` at similar rates so they agree on which
   slots are stale.
-
-### 1D. Return Clones by Default
-
-**Problem addressed:** I-3 (readers holding live pointers)
-
-Change `GetAllActivePlayers()`, `GetAllAccountData()`, `GetAccountDataFromEmail()`, etc.
-to call `.clone()` before returning, so callers get a detached copy that won't change
-underneath them.
-
-**Tradeoffs:**
-- Memory allocation per read (one `sizeof(AccountData)` memcpy per slot).
-- Callers that intentionally want a live reference (e.g., the monitor widget) would need a
-  separate `_raw` accessor.
-- This prevents the scenario where a reader holds a reference that gets overwritten by a
-  different entity when the slot is reused.
 
 ### 1E. Atomic Message Slot State
 
@@ -416,51 +408,6 @@ def attach_segment(self, name: str, expected_version: int, expected_size: int):
 These options redesign the shared memory system while preserving the underlying concepts
 (state replication, message passing, cross-client options) so that existing use cases can be
 migrated mechanically.
-
-### 2A. Double-Buffered State Slots with Copy-on-Read
-
-**Core idea:** Each player slot has two copies of its data (A and B). The writer always writes
-to the *inactive* copy, then atomically flips a flag to make it the *active* copy. Readers
-always read the *active* copy, which is guaranteed to be a complete, consistent snapshot.
-
-```python
-class SlotPair(Structure):
-    _pack_ = 1
-    _fields_ = [
-        ("DataA", AccountData),
-        ("DataB", AccountData),
-        ("ActiveBuffer", c_uint),  # 0 = A is active, 1 = B is active
-    ]
-```
-
-**Writer side:**
-```python
-def publish(self, slot_index, account_email):
-    pair = self.GetStruct().Slots[slot_index]
-    inactive = pair.DataB if pair.ActiveBuffer == 0 else pair.DataA
-    # Write all fields to `inactive` (native snapshot pattern from 1A)
-    _write_snapshot_to_slot(inactive, snapshot)
-    # Flip
-    pair.ActiveBuffer = 1 - pair.ActiveBuffer
-```
-
-**Reader side:**
-```python
-def read(self, slot_index) -> AccountData:
-    pair = self.GetStruct().Slots[slot_index]
-    active = pair.DataA if pair.ActiveBuffer == 0 else pair.DataB
-    return active.clone()  # Return detached copy
-```
-
-**Migration path:** Replace `GLOBAL_CACHE.ShMem.GetAccountDataFromEmail(email)` with
-`GLOBAL_CACHE.ShMem.read_account(email)` — same concept, slightly different name. An
-adapter layer could preserve the old method names during transition.
-
-**Tradeoffs:**
-- Doubles the memory footprint for state data (~2x AccountData * 64 slots).
-- Eliminates torn reads entirely.
-- Writer still needs the snapshot-before-write pattern to avoid stale pointer crashes.
-- The flip is a single uint32 write, effectively atomic on x86.
 
 ### 2B. Topic-Based Pub/Sub Message Bus
 
@@ -601,12 +548,13 @@ and then `player.PlayerHP` would change to `snap = StateBus.get_player(email)` a
 rename mechanically.
 
 **Tradeoffs:**
-- Eliminates the entire class of stale-pointer-into-shmem bugs on the reader side.
-- Immutable snapshots are safe to pass around, store, compare across frames.
+- Clean typed API that enforces batch discipline on the write side (the accessor layer
+  naturally implements 1A's all-or-nothing pattern internally).
+- Immutable snapshots are convenient for consumers that want to compare across frames or
+  pass data between functions without worrying about mutation.
 - Per-read allocation cost (Python dataclass creation). For 64 slots at 15-60 FPS this is
   negligible.
-- Writers still need the snapshot-before-write pattern for native data.
-- Biggest API surface change of the Option 2 proposals, but the most robust.
+- Biggest API surface change of the Option 2 proposals, but the most structured.
 
 ### 2E. Managed Segment Factory for Widgets/Bots
 
@@ -946,43 +894,40 @@ class CommandSender:
 
 ## Comparison Matrix
 
-| Criterion | 1A-F (Incremental) | 2A-E (Rearchitecture) | 3A (SQLite) | 3B (mmap+lock) | 3C (UDP hybrid) | 3D (Pipes) |
-|-----------|--------------------|-----------------------|-------------|-----------------|-----------------|------------|
-| **Eliminates torn reads** | Partial (1B) | Yes (2A, 2D) | Yes | Yes | N/A (state stays in shmem) | N/A |
-| **Eliminates stale pointer crashes** | Partial (1A) | Partial (still need 1A pattern) | Same (need snapshot) | Same (need snapshot) | Same (need snapshot) | Same (need snapshot) |
+| Criterion | 1A,C,E,F (Incremental) | 2B-E (Rearchitecture) | 3A (SQLite) | 3B (mmap+lock) | 3C (UDP hybrid) | 3D (Pipes) |
+|-----------|----------------------|-----------------------|-------------|-----------------|-----------------|------------|
+| **Prevents half-valid frames** | Yes (1A) | Yes (2D enforces 1A pattern) | Yes (transaction boundary) | Yes (if combined with 1A) | Yes (if combined with 1A) | N/A |
 | **Message race safety** | Improved (1E) | Yes (2B) | Yes | Depends on impl | Yes | Yes |
+| **Stale slot cleanup** | Yes (1C) | Yes (inherits 1C) | Yes (query by timestamp) | Manual | N/A | N/A |
 | **Crash recovery** | No | No | Yes (WAL) | Yes (file persists) | No | No |
 | **Custom segment management** | Partial (1F registry) | Yes (2E factory) | N/A (single DB) | Per-file | N/A | N/A |
 | **Migration effort** | Low | Medium | High | Medium | Medium | Medium-High |
-| **Runtime overhead** | ~Same | ~Same (+alloc) | Higher (+IO) | ~Same (+lock) | ~Same (+network) | ~Same (+IO) |
+| **Runtime overhead** | Lower (fewer native lookups) | ~Same (+alloc) | Higher (+IO) | ~Same (+lock) | ~Same (+network) | ~Same (+IO) |
 | **Debugging ease** | Better (1F) | Better (typed API + registry) | Best (SQL queries) | Good (hex dump) | Harder | Harder |
 | **Broadcast support** | Same (loop) | Better (2B ring) | Same (query) | Same (loop) | Best (multicast) | Worst (N sends) |
 | **Schema evolution** | Partial (1F version) | Good (2E versioned) | Easy (ALTER TABLE) | Hard (struct) | Easy (JSON) | Medium |
-| **Windows compat** | Same | Same | Same | Needs compat | Same | Needs compat |
 
 ### Recommended Approach
 
-**Short term (lowest risk, highest impact):** Implement **1A** (snapshot-before-write),
-**1D** (return clones), and **1F** (segment registry). The first two address the most
-dangerous instability (stale native pointers causing crashes) and the most common reader-side
-surprise (live pointers into shmem), without changing any API signatures. 1F provides
-immediate observability into the custom segment ecosystem with minimal effort.
+**Short term (lowest risk, highest impact):** Implement **1A** (all-or-nothing batch writes)
+and **1C** (re-enable timeout cleanup). 1A is the single most impactful change — it prevents
+half-valid frames from being committed and collapses 60+ redundant native lookups into 1,
+directly addressing the most common data quality issue. 1C is a trivial fix (remove one
+`return` statement) that prevents stale slot accumulation.
 
-**Medium term:** Implement **2D** (typed accessor layer with dataclass snapshots) and **2E**
-(managed segment factory) together. 2D can be a new module that wraps the existing
-`Py4GWSharedMemoryManager`, providing a clean API while the underlying storage stays the same.
-2E gives widgets/bots a standardized way to create custom segments with versioning, lifecycle
-management, and registry — replacing the current ad-hoc pattern. Migrate consumers one at a
-time.
+**Medium term:** Implement **1E** (atomic message state) and **1F** (segment registry).
+1E tightens the message system against lost/duplicated commands. 1F provides observability
+into the custom segment ecosystem without forcing migration.
 
 **Long term (if the system continues to grow):** Move to **2C** (separated segments) with
-**2B** (ring buffer messages). The separated segments allow independent evolution of state,
-commands, and config. The ring buffer eliminates the message queue races entirely. If query
+**2B** (ring buffer messages) and **2E** (managed segment factory). The separated segments
+allow independent evolution of state, commands, and config. The ring buffer eliminates
+message queue races entirely. 2E standardizes the custom segment lifecycle. If query
 capability becomes important, consider **3A** (SQLite) for the state segment specifically —
 it naturally solves the custom segment problem too, since any widget can create a table
 instead of a segment.
 
-The stale native pointer problem (the primary crash source) is **orthogonal to the IPC
-mechanism** — it must be solved at the data collection layer (1A pattern) regardless of which
-architecture is chosen. Every option in this document still needs the "snapshot native data
-into Python objects first, then write to shared storage" pattern to avoid crashes.
+The half-valid frame problem (I-1) is **orthogonal to the IPC mechanism** — it must be
+solved at the data collection layer (1A pattern) regardless of which architecture is chosen.
+Every option in this document still needs all-or-nothing batch discipline when collecting
+native data.
