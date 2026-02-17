@@ -256,8 +256,8 @@ class YNodeStruct(NodeStruct):  # inherits: type + id (8 bytes)
 class Portal:
     left_layer_id: int
     right_layer_id: int
-    h0004: int
-    pair_index: int          # index of paired portal, or UINT32_MAX
+    flags: int               # +0x0004: bit 2 = skip expansion
+    pair_index: int          # index of paired portal in right_layer's portal list, or UINT32_MAX
     count: int
     trapezoid_indices: list[int]
     
@@ -298,21 +298,12 @@ class PortalStruct(Structure):
 
         return result
     
-    def snapshot(self, all_portals: list["PortalStruct"]) -> Portal:
-        pair_index = 0xFFFFFFFF  # UINT32_MAX
-
-        pair = self.pair
-        if pair is not None:
-            for i, p in enumerate(all_portals):
-                if p is pair:
-                    pair_index = i
-                    break
-
+    def snapshot(self) -> Portal:
         return Portal(
             left_layer_id=int(self.left_layer_id),
             right_layer_id=int(self.right_layer_id),
-            h0004=int(self.h0004),
-            pair_index=pair_index,
+            flags=int(self.flags),
+            pair_index=0xFFFFFFFF,  # resolved in post-processing
             count=int(self.count),
             trapezoid_indices=list(self.trapezoid_indices),
         )
@@ -323,7 +314,7 @@ class PortalStruct(Structure):
 PortalStruct._fields_ = [
     ("left_layer_id",  c_uint16),                           # +0x0000
     ("right_layer_id", c_uint16),                           # +0x0002
-    ("h0004",          c_uint32),                           # +0x0004
+    ("flags",          c_uint32),                           # +0x0004  bit 2 = skip expansion
     ("pair_ptr",           POINTER(PortalStruct)),                    # +0x0008 Portal*
     ("count",          c_uint32),                           # +0x000C
     ("trapezoids_ptr_ptr",     POINTER(POINTER(PathingTrapezoidStruct))), # +0x0010 PathingTrapezoid**
@@ -449,7 +440,7 @@ def snapshot(self) -> PathingMap:
     #sink_nodes = [s.snapshot_sinknode() for s in sink_structs]
     #x_nodes = [x.snapshot_xnode() for x in x_structs]
     #y_nodes = [y.snapshot_ynode() for y in y_structs]
-    portals = [p.snapshot(portal_structs) for p in portal_structs]
+    portals = [p.snapshot() for p in portal_structs]
 
     # root node id (C++ uses root_node_id in PathingMap; you have root_node_ptr)
     root = self.root_node
@@ -623,11 +614,39 @@ class MapContext_sub1_sub2Struct(Structure):
         ptrs = GW_Array_Value_View(self.pmaps_array, PathingMapStruct).to_list()
         if not ptrs:
             return []
-        
-        result = []
+
+        # First pass: snapshot all planes (pair_index unresolved)
+        result: list[PathingMap] = []
         for pmap_struct in ptrs:
             pmap_snapshot = snapshot(pmap_struct)
             result.append(pmap_snapshot)
+
+        # Second pass: resolve pair_index across planes via pair_ptr addresses
+        import ctypes as _ct
+        portal_size = _ct.sizeof(PortalStruct)
+
+        # Build address → (plane_idx, portal_idx) map
+        addr_map: dict[int, tuple[int, int]] = {}
+        for pi, pmap_struct in enumerate(ptrs):
+            if not pmap_struct.portals_ptr or pmap_struct.portal_count == 0:
+                continue
+            base = _ct.cast(pmap_struct.portals_ptr, _ct.c_void_p).value
+            for idx in range(pmap_struct.portal_count):
+                addr_map[base + idx * portal_size] = (pi, idx)
+
+        # Resolve each portal's pair_index
+        for pi, pmap_struct in enumerate(ptrs):
+            if not pmap_struct.portals_ptr or pmap_struct.portal_count == 0:
+                continue
+            for idx in range(pmap_struct.portal_count):
+                p = pmap_struct.portals_ptr[idx]
+                if not p.pair_ptr:
+                    continue
+                pair_addr = _ct.cast(p.pair_ptr, _ct.c_void_p).value
+                loc = addr_map.get(pair_addr)
+                if loc is not None:
+                    result[pi].portals[idx].pair_index = loc[1]
+
         return result
 
 

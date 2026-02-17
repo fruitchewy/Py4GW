@@ -1,23 +1,23 @@
 """Pathing data loading for arbitrary maps via gw.dat FFNA files.
 
 Reads FFNA type-3 pathing data from the game's dat file, parses trapezoid
-geometry and adjacency, and returns ``PathingMap`` objects compatible with
-the live-map pathing structures in ``MapContext``.
+geometry and adjacency, and returns PathingMap objects compatible with
+the live-map pathing structures in MapContext.
 
-Usage (from widget or corelib wrapper)::
+Usage::
 
     maps = PathingMethods.GetPathingMapsForMap(639)
-    # Returns cached data on hit, or reads/parses/caches synchronously on miss.
 """
 
 import struct
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Optional, List
 
-from ..context.MapContext import PathingMap, PathingTrapezoid, Node
+from ..context.MapContext import PathingMap, PathingTrapezoid, Portal, Node
 
 
-# ─── FFNA constants ───────────────────────────────────────────────────────
+# ── FFNA constants ────────────────────────────────────────────────────────
 
 FFNA_MAGIC = 0x616E6666  # 'ffna' as LE uint32
 CHUNK_TYPE_TRAPEZOID = 0x20000008
@@ -26,7 +26,6 @@ CHUNK_TYPE_TRANSITION = 0x20000004
 
 @dataclass(slots=True)
 class GWPathingTrapezoid:
-    """Raw trapezoid as stored in the FFNA file."""
     adjacent1: int
     adjacent2: int
     adjacent3: int
@@ -41,14 +40,28 @@ class GWPathingTrapezoid:
     xbr: float
 
 
-# ─── High-level API ───────────────────────────────────────────────────────
+@dataclass(slots=True)
+class FFNAPortalRecord:
+    count: int          # traps in this portal on this plane
+    trap_offset: int    # starting index into portal_trap_ids
+    portal_index: int   # global portal ID (shared between 2 planes)
+
+
+@dataclass(slots=True)
+class FFNAPlaneData:
+    trapezoids: list[GWPathingTrapezoid] = field(default_factory=list)
+    portal_records: list[FFNAPortalRecord] = field(default_factory=list)
+    portal_trap_ids: list[int] = field(default_factory=list)
+
+
+# ── High-level API ────────────────────────────────────────────────────────
 
 class PathingMethods:
     _cache: dict[int, List[PathingMap]] = {}
 
     @staticmethod
     def GetPathingMapsForMap(map_id: int) -> List[PathingMap]:
-        """Get pathing for any map.  Synchronous: cache hit or read/parse/cache."""
+        """Get pathing for any map. Synchronous: cache hit or read/parse/cache."""
         if map_id in PathingMethods._cache:
             return PathingMethods._cache[map_id]
 
@@ -63,13 +76,12 @@ class PathingMethods:
             PathingMethods._cache[map_id] = []
             return []
 
-        planes = parse_ffna_trapezoids(data)
-        PathingMethods._cache[map_id] = _build_pathing_maps(planes) if planes else []
+        plane_data = parse_ffna_pathing(data)
+        PathingMethods._cache[map_id] = _build_pathing_maps(plane_data) if plane_data else []
         return PathingMethods._cache[map_id]
 
     @staticmethod
     def ClearCache(map_id: Optional[int] = None) -> None:
-        """Clear cached pathing data.  No args = clear all."""
         if map_id is None:
             PathingMethods._cache.clear()
         else:
@@ -77,24 +89,20 @@ class PathingMethods:
 
     @staticmethod
     def CacheResult(map_id: int, maps: List[PathingMap]) -> None:
-        """Store an externally-obtained pathing result (e.g. live data)."""
         PathingMethods._cache[map_id] = maps
 
     @staticmethod
     def HasDatEntry(map_id: int) -> bool:
-        """Return True if the static table has a dat file_id for this map."""
         return map_id in _MAP_ID_TO_DAT_FILE_ID
 
     @staticmethod
     def GetAvailableMapIds() -> set[int]:
-        """Return the set of map IDs that offline pathing can be loaded for."""
         return set(_MAP_ID_TO_DAT_FILE_ID.keys())
 
 
-# ─── FFNA parsing helpers ─────────────────────────────────────────────────
+# ── FFNA parsing ──────────────────────────────────────────────────────────
 
 def _parse_chunks(data: bytes) -> list[tuple[int, int, bytes]]:
-    """Split an FFNA file into (chunk_type, chunk_length, chunk_data) tuples."""
     pos = 5  # skip 4-byte magic + 1-byte type
     chunks: list[tuple[int, int, bytes]] = []
     while pos + 8 <= len(data):
@@ -108,7 +116,6 @@ def _parse_chunks(data: bytes) -> list[tuple[int, int, bytes]]:
 
 
 def is_ffna_pathing(data: bytes) -> bool:
-    """Return True if *data* is an FFNA type-3 file (pathing data)."""
     if len(data) < 5:
         return False
     magic = struct.unpack_from('<I', data, 0)[0]
@@ -118,11 +125,18 @@ def is_ffna_pathing(data: bytes) -> bool:
 def parse_ffna_trapezoids(
     data: bytes,
 ) -> Optional[list[list[GWPathingTrapezoid]]]:
-    """Parse an FFNA file and extract trapezoids grouped by plane.
+    """Parse FFNA file, extract trapezoids grouped by plane.
 
-    Returns ``trapezoids_by_plane[plane_index]`` which is a list of
-    :class:`GWPathingTrapezoid`.  Returns ``None`` on parse failure.
+    Legacy wrapper — prefer parse_ffna_pathing() for full portal data.
     """
+    plane_data = parse_ffna_pathing(data)
+    if plane_data is None:
+        return None
+    return [pd.trapezoids for pd in plane_data]
+
+
+def parse_ffna_pathing(data: bytes) -> Optional[list[FFNAPlaneData]]:
+    """Parse FFNA pathing chunk: trapezoids + portal data per plane."""
     if not is_ffna_pathing(data):
         return None
 
@@ -138,7 +152,6 @@ def parse_ffna_trapezoids(
         return None
 
     chunk_length, chunk_data = trap_chunk
-    trapezoids_by_plane: list[list[GWPathingTrapezoid]] = []
 
     if chunk_length < 17:
         return None
@@ -155,7 +168,9 @@ def parse_ffna_trapezoids(
     _section_count = struct.unpack_from('<i', chunk_data, cur_pos)[0]
     cur_pos += 4
 
-    plane = 0
+    planes: list[FFNAPlaneData] = []
+    current_plane: FFNAPlaneData | None = None
+
     while cur_pos < chunk_length:
         section_header = chunk_data[cur_pos]
         cur_pos += 1
@@ -169,41 +184,61 @@ def parse_ffna_trapezoids(
             section_length = struct.unpack_from('<i', chunk_data, cur_pos)[0] // 2
         cur_pos += 4
 
-        if section_header == 2:
+        sec_end = cur_pos + section_length
+
+        # Section 0x00: plane header — start a new plane
+        if section_header == 0x00:
+            current_plane = FFNAPlaneData()
+            planes.append(current_plane)
+
+        # Section 0x02: trapezoids
+        elif section_header == 0x02 and current_plane is not None:
             tmp_pos = cur_pos
-            while tmp_pos + 44 <= cur_pos + section_length:
+            while tmp_pos + 44 <= sec_end:
                 if tmp_pos + 44 > chunk_length:
                     break
-
                 adj1, adj2, adj3, adj4 = struct.unpack_from('<iiii', chunk_data, tmp_pos)
                 tmp_pos += 16
-                trans1, trans2 = struct.unpack_from('<hh', chunk_data, tmp_pos)
+                trans1, trans2 = struct.unpack_from('<HH', chunk_data, tmp_pos)
                 tmp_pos += 4
                 yt, yb, xtl, xtr, xbl, xbr = struct.unpack_from('<ffffff', chunk_data, tmp_pos)
                 tmp_pos += 24
+                current_plane.trapezoids.append(GWPathingTrapezoid(
+                    adjacent1=adj1, adjacent2=adj2,
+                    adjacent3=adj3, adjacent4=adj4,
+                    transition1=trans1, transition2=trans2,
+                    yt=yt, yb=yb, xtl=xtl, xtr=xtr, xbl=xbl, xbr=xbr,
+                ))
 
-                if yt != yb:
-                    while plane >= len(trapezoids_by_plane):
-                        trapezoids_by_plane.append([])
-                    trapezoids_by_plane[plane].append(GWPathingTrapezoid(
-                        adjacent1=adj1, adjacent2=adj2,
-                        adjacent3=adj3, adjacent4=adj4,
-                        transition1=trans1, transition2=trans2,
-                        yt=yt, yb=yb, xtl=xtl, xtr=xtr, xbl=xbl, xbr=xbr,
-                    ))
+        # Section 0x09: portal records (9 bytes each: u16 count, u16 offset, u16 field2, u16 portal_index, u8 pad)
+        elif section_header == 0x09 and current_plane is not None:
+            tmp_pos = cur_pos
+            while tmp_pos + 9 <= sec_end:
+                cnt, off, _f2, pidx = struct.unpack_from('<HHHH', chunk_data, tmp_pos)
+                current_plane.portal_records.append(FFNAPortalRecord(
+                    count=cnt, trap_offset=off, portal_index=pidx,
+                ))
+                tmp_pos += 9
 
-            plane += 1
+        # Section 0x0A: portal trap indices (uint32 per-plane trap IDs)
+        elif section_header == 0x0A and current_plane is not None:
+            tmp_pos = cur_pos
+            while tmp_pos + 4 <= sec_end:
+                tid = struct.unpack_from('<I', chunk_data, tmp_pos)[0]
+                current_plane.portal_trap_ids.append(tid)
+                tmp_pos += 4
 
-        cur_pos += section_length
+        # Inter-plane sections signal end of per-plane data
+        elif section_header in (0x0C, 0x0D, 0x0E, 0xFF):
+            break
 
-    return trapezoids_by_plane if trapezoids_by_plane else None
+        cur_pos = sec_end
+
+    return planes if planes else None
 
 
 def parse_ffna_transitions(data: bytes) -> list[tuple[float, float, float, float]]:
-    """Parse FFNA file and extract transition vectors.
-
-    Returns list of ``(x1, y1, x2, y2)`` tuples.
-    """
+    """Parse FFNA file and extract transition vectors."""
     if not is_ffna_pathing(data):
         return []
 
@@ -257,36 +292,88 @@ def parse_ffna_transitions(data: bytes) -> list[tuple[float, float, float, float
     return result
 
 
-# ─── PathingMap builder ───────────────────────────────────────────────────
+# ── PathingMap builder ────────────────────────────────────────────────────
 
-def _build_pathing_maps(planes: list[list[GWPathingTrapezoid]]) -> List[PathingMap]:
-    """Convert parsed FFNA planes into PathingMap objects."""
+def _build_pathing_maps(plane_data: list[FFNAPlaneData]) -> List[PathingMap]:
     UINT32_MAX = 0xFFFFFFFF
+
+    # Compute per-plane ID offsets so trap IDs are globally unique.
+    plane_offsets: list[int] = []
+    offset = 0
+    for pd in plane_data:
+        plane_offsets.append(offset)
+        offset += len(pd.trapezoids)
+
+    # Build portal_index → list of (plane, portal_list_idx) for pairing.
+    portal_to_planes: dict[int, list[int]] = defaultdict(list)
+    portal_index_to_loc: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for plane_idx, pd in enumerate(plane_data):
+        for portal_list_idx, rec in enumerate(pd.portal_records):
+            portal_to_planes[rec.portal_index].append(plane_idx)
+            portal_index_to_loc[rec.portal_index].append((plane_idx, portal_list_idx))
+
     result: List[PathingMap] = []
-    for plane_idx, gw_traps in enumerate(planes):
+    for plane_idx, pd in enumerate(plane_data):
+        base = plane_offsets[plane_idx]
         trapezoids = [
             PathingTrapezoid(
-                id=i,
+                id=base + i,
                 portal_left=t.transition1,
                 portal_right=t.transition2,
                 XTL=t.xtl, XTR=t.xtr, YT=t.yt,
                 XBL=t.xbl, XBR=t.xbr, YB=t.yb,
                 neighbor_ids=[
-                    a for a in (t.adjacent1, t.adjacent2,
-                                t.adjacent3, t.adjacent4)
+                    base + a for a in (t.adjacent1, t.adjacent2,
+                                       t.adjacent3, t.adjacent4)
                     if a >= 0
                 ],
             )
-            for i, t in enumerate(gw_traps)
+            for i, t in enumerate(pd.trapezoids)
         ]
+
+        # Build Portal objects from section 0x9/0xA data.
+        portals: list[Portal] = []
+        for rec in pd.portal_records:
+            # Find the other plane sharing this portal_index.
+            other_planes = portal_to_planes.get(rec.portal_index, [])
+            right_layer = -1
+            for op in other_planes:
+                if op != plane_idx:
+                    right_layer = op
+                    break
+
+            # Resolve pair_index: find the matching portal on right_layer.
+            pair_index = UINT32_MAX
+            if right_layer >= 0:
+                for loc_plane, loc_idx in portal_index_to_loc[rec.portal_index]:
+                    if loc_plane == right_layer:
+                        pair_index = loc_idx
+                        break
+
+            # Resolve per-plane trap IDs to global IDs via section 0xA.
+            trap_indices: list[int] = []
+            for k in range(rec.count):
+                idx = rec.trap_offset + k
+                if idx < len(pd.portal_trap_ids):
+                    trap_indices.append(base + pd.portal_trap_ids[idx])
+
+            portals.append(Portal(
+                left_layer_id=plane_idx,
+                right_layer_id=right_layer,
+                flags=0,  # FFNA doesn't store flags; game sets at runtime
+                pair_index=pair_index,
+                count=rec.count,
+                trapezoid_indices=trap_indices,
+            ))
+
         result.append(PathingMap(
             zplane=plane_idx,
             h0004=0, h0008=0, h000C=0, h0010=0,
             trapezoid_count=len(trapezoids),
             sink_node_count=0, x_node_count=0,
-            y_node_count=0, portal_count=0,
+            y_node_count=0, portal_count=len(portals),
             trapezoids=trapezoids,
-            sink_nodes=[], x_nodes=[], y_nodes=[], portals=[],
+            sink_nodes=[], x_nodes=[], y_nodes=[], portals=portals,
             h0034=0, h0038=0,
             root_node=Node(type=0, id=0),
             root_node_id=UINT32_MAX,
@@ -295,10 +382,8 @@ def _build_pathing_maps(planes: list[list[GWPathingTrapezoid]]) -> List[PathingM
     return result
 
 
-# ─── map_id → dat file_id table ───────────────────────────────────────────
-# Static because AreaInfoStruct.file_id is zero for most maps at runtime;
-# no known dynamic source exists for this mapping. Static mapping also used by
-# GWMapBrowser and GW-Pathing-Map-Visualizer.  
+# ── map_id -> dat file_id table ───────────────────────────────────────────
+
 _MAP_ID_TO_DAT_FILE_ID = {
     2: 127428, 3: 213190, 6: 127532, 7: 127484, 8: 127496, 9: 127532, 10: 13531, 11: 40796,
     12: 13105, 13: 14936, 14: 35379, 15: 33663, 16: 33665, 17: 34039, 18: 34045, 19: 37216,

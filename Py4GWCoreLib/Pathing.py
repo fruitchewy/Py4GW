@@ -153,7 +153,7 @@ class NavMesh:
         self._bsp = TrapezoidBSP(list(self.trapezoids.values()))
 
         self.create_all_local_portals()
-        self._create_cross_layer_portals_from_snapshots(pathing_maps)
+        self._create_cross_layer_portals(pathing_maps)
 
     def get_adjacent_side(self, a: PathingTrapezoid, b: PathingTrapezoid) -> Optional[str]:
         if abs(a.YB - b.YT) < 1.0: return 'bottom_top'
@@ -251,41 +251,41 @@ class NavMesh:
 
         return False
 
-    def _create_cross_layer_portals_from_snapshots(self, pathing_maps):
-        """Build cross-layer portal connections from snapshot portal data."""
-        cross_groups: Dict[Tuple[int, int], Dict[int, List[PathingTrapezoid]]] = defaultdict(lambda: defaultdict(list))
+    def _create_cross_layer_portals(self, pathing_maps):
+        """Build cross-layer portal connections matching game's ExpandPortalLeft/Right.
+
+        Game follows pair_ptr to get the paired portal's traps (other layer),
+        then connects any trap pair with Y-overlap. Each portal only has traps
+        from its own plane; pair_index points to the paired portal on right_layer.
+        """
+        UINT32_MAX = 0xFFFFFFFF
+        connected: set = set()
 
         for plane_idx, pmap in enumerate(pathing_maps):
             for portal in pmap.portals:
-                if portal.left_layer_id == portal.right_layer_id:
+                if portal.right_layer_id < 0 or portal.pair_index == UINT32_MAX:
                     continue
+                # Get paired portal's traps (other layer)
+                other_pmap = pathing_maps[portal.right_layer_id]
+                if portal.pair_index >= len(other_pmap.portals):
+                    continue
+                pair_portal = other_pmap.portals[portal.pair_index]
 
-                layer_pair = (min(portal.left_layer_id, portal.right_layer_id),
-                              max(portal.left_layer_id, portal.right_layer_id))
-
-                for trap_id in portal.trapezoid_indices:
-                    trap = self.trapezoids.get(trap_id)
-                    if trap:
-                        cross_groups[layer_pair][plane_idx].append(trap)
-
-        for plane_map in cross_groups.values():
-            planes = list(plane_map.keys())
-            if len(planes) < 2:
-                continue
-
-            for i in range(len(planes)):
-                for j in range(i + 1, len(planes)):
-                    traps_i = plane_map[planes[i]]
-                    traps_j = plane_map[planes[j]]
-
-                    for ti in traps_i:
-                        ai = AABB(ti)
-                        for tj in traps_j:
-                            if ti.id == tj.id:
-                                continue
-                            aj = AABB(tj)
-                            if self.touching(ai, aj):
-                                self.create_portal(ai, aj, None)
+                # Connect this portal's traps x paired portal's traps with Y-overlap
+                for tid_a in portal.trapezoid_indices:
+                    ta = self.trapezoids.get(tid_a)
+                    if ta is None:
+                        continue
+                    for tid_b in pair_portal.trapezoid_indices:
+                        edge = (min(tid_a, tid_b), max(tid_a, tid_b))
+                        if edge in connected:
+                            continue
+                        tb = self.trapezoids.get(tid_b)
+                        if tb is None:
+                            continue
+                        if max(ta.YB, tb.YB) <= min(ta.YT, tb.YT):
+                            connected.add(edge)
+                            self.create_portal(AABB(ta), AABB(tb), None)
 
 
     def get_position(self, t_id: int) -> Tuple[float, float]:

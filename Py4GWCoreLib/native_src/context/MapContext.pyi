@@ -111,15 +111,15 @@ class YNodeStruct(NodeStruct):
 class Portal:
     left_layer_id: int
     right_layer_id: int
-    h0004: int
-    pair_index: int          # index of paired portal, or UINT32_MAX
+    flags: int               # +0x0004: bit 2 = skip expansion
+    pair_index: int          # index of paired portal in right_layer's portal list, or UINT32_MAX
     count: int
     trapezoid_indices: list[int]
 
 class PortalStruct(Structure):
     left_layer_id: int
     right_layer_id: int
-    h0004: int
+    flags: int
     pair_ptr: Optional[CPointer["PortalStruct"]]
     count: int
     trapezoids_ptr_ptr: Optional[CPointer[PathingTrapezoidStruct]]
