@@ -101,6 +101,29 @@ class TrapezoidBSP:
                     stack.append(node.above)
         return None
 
+    def find_all(self, x: float, y: float, tol: float = 0.0) -> List[int]:
+        """Return *all* trapezoid IDs containing (x, y), across every z-layer."""
+        if self._root is None:
+            return []
+
+        result: List[int] = []
+        stack = [self._root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, _BspLeaf):
+                for t in node.traps:
+                    if _point_in_trapezoid(x, y, t, tol):
+                        result.append(t.id)
+            else:
+                if y > node.split_y + tol:
+                    stack.append(node.above)
+                elif y < node.split_y - tol:
+                    stack.append(node.below)
+                else:
+                    stack.append(node.below)
+                    stack.append(node.above)
+        return result
+
     def find_with_margin(self, x: float, y: float, margin: float) -> bool:
         """Return True if (x, y) is inside a trapezoid with margin inset from edges."""
         if self._root is None:
@@ -300,6 +323,24 @@ class NavMesh:
     def find_trapezoid_id_by_coord(self, point: Tuple[float, float], tol: float = 20.0) -> Optional[int]:
         """Return trapezoid ID containing point, or None."""
         return self._bsp.find(point[0], point[1], tol)
+
+    def find_all_trapezoid_ids_by_coord(self, point: Tuple[float, float], tol: float = 20.0) -> List[int]:
+        """Return all trapezoid IDs containing point (across every z-layer)."""
+        return self._bsp.find_all(point[0], point[1], tol)
+
+    def find_highest_trapezoid_id_by_coord(self, point: Tuple[float, float], tol: float = 20.0) -> Optional[int]:
+        """Return the trapezoid ID on the highest z-layer containing point, or None."""
+        ids = self._bsp.find_all(point[0], point[1], tol)
+        if not ids:
+            return None
+        return max(ids, key=lambda tid: self.trap_id_to_layer.get(tid, 0))
+
+    def get_highest_z_layer_at(self, point: Tuple[float, float], tol: float = 20.0) -> Optional[int]:
+        """Return the highest z-layer index at point, or None if no trapezoid found."""
+        ids = self._bsp.find_all(point[0], point[1], tol)
+        if not ids:
+            return None
+        return max(self.trap_id_to_layer.get(tid, 0) for tid in ids)
 
     def has_line_of_sight(self,
                           p1: Tuple[float, float],
