@@ -188,7 +188,7 @@ class UIMessage(IntEnum):
     kChangeSettingsTab          = 0x10000177 # 0x10000177, wparam = uint32_t is_interface_tab
     kDestroyUIPositionOverlay   = 0x10000179 # 0x10000179
     kEnableUIPositionOverlay    = 0x1000017a # 0x1000017a, wparam = uint32_t enable
-
+      
     kGuildHall                  = 0x1000017F # was 0x1000017C, wparam = gh key (uint32_t[4])
     kLeaveGuildHall             = 0x10000181 # was 0x1000017E
     kTravel                     = 0x10000182 # was 0x1000017F
