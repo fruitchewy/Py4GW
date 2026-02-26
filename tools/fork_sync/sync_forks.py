@@ -136,20 +136,21 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
     if not claude_cmd:
         return False
 
-    # --allowedTools takes each tool as a separate argument, not comma-separated
+    # --allowedTools: comma-separated in a single flag
+    tools_str = ",".join(allowed_tools)
     cmd = [
         claude_cmd, "-p", prompt,
         "--append-system-prompt-file", str(system_prompt_file),
+        "--allowedTools", tools_str,
         "--max-turns", str(max_turns),
         "--output-format", "text",
         "--verbose",
     ]
-    for tool in allowed_tools:
-        cmd.extend(["--allowedTools", tool])
 
     log("Invoking Claude Code for touchpoint reconciliation ...")
-    log(f"  Timeout: {timeout_minutes} minutes")
-    log(f"  Allowed tools: {allowed_tools}")
+    log(f"  Command: {' '.join(cmd[:6])} ... (truncated)")
+    log(f"  Tools string: {tools_str}")
+    log(f"  Max turns: {max_turns}, Timeout: {timeout_minutes} min")
 
     try:
         result = subprocess.run(
