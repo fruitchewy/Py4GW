@@ -288,11 +288,6 @@ def main():
         ensure_remote(remote, url)
         fetch_remote(remote, branch)
 
-        if DRY_RUN:
-            log(f"(dry-run) Would process {fork_name} from {ref}")
-            log("(dry-run) Skipping actual checkout and merge steps")
-            continue
-
         # -------------------------------------------------------------------
         # Phase 1: Pull exclusive paths (deterministic, no merge needed)
         # -------------------------------------------------------------------
@@ -303,12 +298,17 @@ def main():
         all_exclusive = [p for p in exclusive + widgets if p]
 
         if all_exclusive:
-            pulled = checkout_paths(ref, all_exclusive)
-            if pulled:
-                git("add", "--", *pulled)
-                log(f"Phase 1 complete: {len(pulled)} path(s) pulled")
+            if DRY_RUN:
+                log(f"(dry-run) Would pull {len(all_exclusive)} exclusive path(s) from {ref}")
+                for p in all_exclusive:
+                    log(f"  {p}")
             else:
-                warn("Phase 1: No paths were successfully pulled")
+                pulled = checkout_paths(ref, all_exclusive)
+                if pulled:
+                    git("add", "--", *pulled)
+                    log(f"Phase 1 complete: {len(pulled)} path(s) pulled")
+                else:
+                    warn("Phase 1: No paths were successfully pulled")
         else:
             log("Phase 1: No exclusive paths defined")
 
@@ -355,13 +355,9 @@ def main():
                 in_fork = git_output("ls-tree", "--name-only", ref, "--", fp)
 
                 if not in_fork or in_fork == "":
-                    # Fork deleted this file — nothing to integrate
-                    continue
+                    continue  # Fork deleted this file
                 if not in_upstream or in_upstream == "":
-                    # File only exists in fork, not upstream — it's fork-exclusive
-                    # content that wasn't listed in exclusive_paths. Skip it since
-                    # it's not a "shared" touchpoint.
-                    continue
+                    continue  # Fork-only file, not a shared touchpoint
 
                 # Both sides have the file. Check if they differ.
                 diff = git_output("diff", upstream_ref, ref, "--", fp)
@@ -375,50 +371,54 @@ def main():
                 for tp in needs_work:
                     log(f"    {tp}")
 
-                file_list = " ".join(needs_work)
-                claude_succeeded = False
+                if DRY_RUN:
+                    log("(dry-run) Would reconcile the above files. Skipping.")
+                else:
+                    file_list = " ".join(needs_work)
+                    claude_succeeded = False
 
-                if use_claude and find_claude():
-                    # Build prompt with conflict policy
-                    if conflict_policy == "prefer_source":
-                        policy = (
-                            "CONFLICT POLICY: prefer_source — This is the user's OWN branch. "
-                            "Their changes are intentional. On conflicts, KEEP THE SOURCE BRANCH "
-                            "version. Upstream main is the base to add to, not the authority."
+                    if use_claude and find_claude():
+                        if conflict_policy == "prefer_source":
+                            policy = (
+                                "CONFLICT POLICY: prefer_source — This is the user's OWN branch. "
+                                "Their changes are intentional. On conflicts, KEEP THE SOURCE BRANCH "
+                                "version. Upstream main is the base to add to, not the authority."
+                            )
+                        else:
+                            policy = (
+                                "CONFLICT POLICY: prefer_upstream — This is an EXTERNAL fork. "
+                                "Upstream likely has newer fixes. On conflicts, KEEP UPSTREAM's "
+                                "version. Only integrate clearly additive content from the fork."
+                            )
+
+                        prompt = (
+                            f"Reconcile these core touchpoint files between upstream (main) "
+                            f"and source '{fork_name}' (remote: {ref}).\n\n"
+                            f"{policy}\n\n"
+                            f"Files to check: {file_list}"
                         )
-                    else:
-                        policy = (
-                            "CONFLICT POLICY: prefer_upstream — This is an EXTERNAL fork. "
-                            "Upstream likely has newer fixes. On conflicts, KEEP UPSTREAM's "
-                            "version. Only integrate clearly additive content from the fork."
-                        )
 
-                    prompt = (
-                        f"Reconcile these core touchpoint files between upstream (main) "
-                        f"and source '{fork_name}' (remote: {ref}).\n\n"
-                        f"{policy}\n\n"
-                        f"Files to check: {file_list}"
-                    )
+                        system_prompt_file = script_dir / "claude_merge_prompt.txt"
+                        claude_succeeded = run_claude(prompt, system_prompt_file, claude_tools, claude_max_turns)
+                    elif use_claude:
+                        warn("Claude Code CLI not found.")
 
-                    system_prompt_file = script_dir / "claude_merge_prompt.txt"
-                    claude_succeeded = run_claude(prompt, system_prompt_file, claude_tools, claude_max_turns)
-                elif use_claude:
-                    warn("Claude Code CLI not found.")
-
-                # If Claude didn't run or failed, print diffs to stdout (captured, no pager)
-                if not claude_succeeded:
-                    log("Diffs for manual review:")
-                    for tp in needs_work:
-                        diff_text = git_output("diff", upstream_ref, ref, "--", tp)
-                        if diff_text:
-                            print(f"\n--- {tp} ---")
-                            print(diff_text)
-                    warn(f"Manual reconciliation needed for: {file_list}")
+                    # If Claude didn't run or failed, print diffs to stdout (captured, no pager)
+                    if not claude_succeeded:
+                        log("Diffs for manual review:")
+                        for tp in needs_work:
+                            diff_text = git_output("diff", upstream_ref, ref, "--", tp)
+                            if diff_text:
+                                print(f"\n--- {tp} ---")
+                                print(diff_text)
+                        warn(f"Manual reconciliation needed for: {file_list}")
 
         # -------------------------------------------------------------------
         # Phase 3: Commit (if auto_commit enabled)
         # -------------------------------------------------------------------
-        if auto_commit:
+        if DRY_RUN:
+            log("(dry-run) Skipping commit")
+        elif auto_commit:
             check = git("diff", "--cached", "--quiet", check=False, capture=True)
             if check.returncode == 0:
                 log(f"No changes to commit for {fork_name}")
