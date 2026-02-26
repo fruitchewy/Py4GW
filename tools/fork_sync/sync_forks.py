@@ -37,18 +37,16 @@ def git(*args, check=True, capture=False, cwd=None):
     kwargs = {"cwd": cwd or REPO_ROOT}
     if capture:
         kwargs["capture_output"] = True
-        kwargs["text"] = True
-    if not check:
-        kwargs["check"] = False
-    else:
-        kwargs["check"] = True
+        kwargs["encoding"] = "utf-8"
+        kwargs["errors"] = "replace"
+    kwargs["check"] = check
     return subprocess.run(cmd, **kwargs)
 
 
 def git_output(*args, cwd=None):
     """Run a git command and return stdout, or None on failure."""
     result = git(*args, check=False, capture=True, cwd=cwd)
-    if result.returncode != 0:
+    if result.returncode != 0 or result.stdout is None:
         return None
     return result.stdout.strip()
 
@@ -107,7 +105,7 @@ def checkout_paths(ref, paths):
         if result.returncode == 0:
             pulled.append(path)
         else:
-            warn(f"  git checkout failed for {path}: {result.stderr.strip()}")
+            warn(f"  git checkout failed for {path}: {(result.stderr or '').strip()}")
 
     return pulled
 
@@ -159,7 +157,8 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
             timeout=timeout_minutes * 60,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except subprocess.TimeoutExpired:
         warn(f"Claude Code timed out after {timeout_minutes} minutes")
