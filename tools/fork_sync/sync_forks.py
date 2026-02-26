@@ -256,6 +256,14 @@ def main():
     sync_order = manifest.get("sync_order", [])
     forks = manifest.get("forks", {})
 
+    # Fetch upstream so we have a current ref for merge-base
+    upstream = manifest.get("upstream", {})
+    upstream_remote = upstream.get("remote", "origin")
+    upstream_branch = upstream.get("branch", "main")
+    upstream_ref = f"{upstream_remote}/{upstream_branch}"
+    ensure_remote(upstream_remote, upstream.get("url", ""))
+    fetch_remote(upstream_remote, upstream_branch)
+
     # Process each fork
     for fork_name in sync_order:
         if args.fork_filter and fork_name != args.fork_filter:
@@ -314,7 +322,7 @@ def main():
         # changes, not every file where upstream moved ahead of the fork.
         explicit_touchpoints = [p for p in fork.get("core_touchpoints", []) if p]
 
-        merge_base = git_output("merge-base", "HEAD", ref)
+        merge_base = git_output("merge-base", upstream_ref, ref)
         if merge_base:
             diff_files_raw = git_output("diff", "--name-only", merge_base, ref)
         else:
