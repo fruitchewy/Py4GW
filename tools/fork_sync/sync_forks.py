@@ -128,7 +128,7 @@ def find_claude():
     return None
 
 
-def run_claude(prompt, system_prompt_file, allowed_tools, max_turns):
+def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_minutes=5):
     """Invoke Claude Code CLI for touchpoint reconciliation."""
     claude_cmd = find_claude()
     if not claude_cmd:
@@ -137,13 +137,26 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns):
     cmd = [
         claude_cmd, "-p", prompt,
         "--append-system-prompt-file", str(system_prompt_file),
-        "--allowedTools", allowed_tools,
         "--max-turns", str(max_turns),
         "--output-format", "text",
+        "--verbose",
+        "--dangerously-skip-permissions",
     ]
 
     log("Invoking Claude Code for touchpoint reconciliation ...")
-    result = subprocess.run(cmd, cwd=REPO_ROOT)
+    log(f"  Timeout: {timeout_minutes} minutes")
+    log(f"  Command: {' '.join(cmd[:6])} ...")
+
+    try:
+        result = subprocess.run(
+            cmd, cwd=REPO_ROOT,
+            timeout=timeout_minutes * 60,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        warn(f"Claude Code timed out after {timeout_minutes} minutes")
+        return False
+
     if result.returncode != 0:
         warn(f"Claude Code exited with code {result.returncode}")
         return False
