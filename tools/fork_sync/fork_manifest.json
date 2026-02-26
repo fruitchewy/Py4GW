@@ -1,15 +1,13 @@
 {
-  "$schema": "Fork/branch dependency manifest for Py4GW multi-source sync strategy",
   "$doc": [
-    "Each source entry declares what exclusive content to pull and what shared files may need reconciliation.",
+    "Each source entry declares exclusive content to pull and a conflict policy.",
     "Sources can be external forks OR branches on your own repo.",
+    "Touchpoints (shared files the fork modified) are auto-detected from git diff.",
     "",
-    "exclusive_paths: directories/files owned entirely by this source — pulled via git checkout, no merge needed.",
-    "core_touchpoints: shared upstream files this source may modify — these require intelligent merge via Claude Code.",
-    "widget_entries: widget files that serve as entry points (pulled like exclusive_paths but live outside the lib dir).",
-    "conflict_policy: 'prefer_upstream' (default) for external forks where upstream likely has newer fixes.",
-    "                  'prefer_source' for your own branches where you intentionally changed corelib files.",
-    "The sync script processes exclusive_paths with plain git, then hands core_touchpoints to Claude Code for review."
+    "exclusive_paths: directories/files owned entirely by this source — pulled via git checkout.",
+    "widget_entries: widget entry points — pulled like exclusive_paths but live outside the lib dir.",
+    "conflict_policy: 'prefer_upstream' (default) keeps upstream on conflicts.",
+    "                  'prefer_source' keeps the source branch on conflicts."
   ],
 
   "upstream": {
@@ -23,7 +21,6 @@
       "remote": "frenkey",
       "url": "https://github.com/frenkey-derp/Py4GW.git",
       "branch": "mods_port",
-      "description": "LootEx automated loot management + ItemHandling + Scripts",
       "conflict_policy": "prefer_upstream",
 
       "exclusive_paths": [
@@ -34,32 +31,7 @@
 
       "widget_entries": [
         "Widgets/Guild Wars/Items & Loot/LootEx.py"
-      ],
-
-      "core_touchpoints": [
-        "Py4GWCoreLib/enums_src/Multiboxing_enums.py",
-        "Widgets/System/Messaging.py"
-      ],
-
-      "notes": "The enum LootEx=999 and its no-op handler already exist upstream. If upstream stays current, core_touchpoints may need no action."
-    },
-
-    "my-corelib-fixes": {
-      "remote": "origin",
-      "url": "https://github.com/fruitchewy/Py4GW.git",
-      "branch": "CHANGE_ME",
-      "description": "Example: your own branch with corelib changes",
-      "conflict_policy": "prefer_source",
-
-      "exclusive_paths": [],
-
-      "widget_entries": [],
-
-      "core_touchpoints": [
-        "Py4GWCoreLib/CHANGE_ME.py"
-      ],
-
-      "notes": "Template entry. Set branch and core_touchpoints to your actual values. prefer_source means your branch wins on conflicts."
+      ]
     }
   },
 
