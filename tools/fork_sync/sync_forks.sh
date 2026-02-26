@@ -36,6 +36,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
+# Helpers (defined early — needed by REPO_ROOT resolution)
+# ---------------------------------------------------------------------------
+log()  { echo "[sync] $*"; }
+warn() { echo "[sync] WARNING: $*" >&2; }
+die()  { echo "[sync] ERROR: $*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
 # Resolve REPO_ROOT
 # ---------------------------------------------------------------------------
 if [[ -z "$REPO_ROOT" ]]; then
@@ -47,13 +54,6 @@ if [[ -z "$REPO_ROOT" ]]; then
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 fi
 [[ -n "$REPO_ROOT" ]] || die "Could not find git repo. Use --repo <path> or run from inside the repo."
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-log()  { echo "[sync] $*"; }
-warn() { echo "[sync] WARNING: $*" >&2; }
-die()  { echo "[sync] ERROR: $*" >&2; exit 1; }
 
 jq_read() { jq -r "$1" "$MANIFEST"; }
 
