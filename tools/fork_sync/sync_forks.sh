@@ -127,7 +127,10 @@ CLAUDE_TOOLS=$(jq_read '.sync_options.claude_allowed_tools // "Read,Edit,Grep,Gl
 $NO_CLAUDE && USE_CLAUDE=false
 
 # Read fork order
-mapfile -t SYNC_ORDER < <(jq_read '.sync_order[]')
+SYNC_ORDER=()
+while IFS= read -r p; do
+  [[ -n "$p" ]] && SYNC_ORDER+=("$p")
+done < <(jq_read '.sync_order[]')
 
 # Process each fork
 for fork_name in "${SYNC_ORDER[@]}"; do
@@ -161,14 +164,17 @@ for fork_name in "${SYNC_ORDER[@]}"; do
   # -----------------------------------------------------------------------
   log "--- Phase 1: Exclusive paths ---"
 
-  mapfile -t exclusive < <(jq_read ".forks[\"$fork_name\"].exclusive_paths[]? // empty")
-  mapfile -t widgets < <(jq_read ".forks[\"$fork_name\"].widget_entries[]? // empty")
-
-  all_exclusive=("${exclusive[@]}" "${widgets[@]}")
+  all_exclusive=()
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && all_exclusive+=("$p")
+  done < <(jq_read ".forks[\"$fork_name\"].exclusive_paths[]? // empty")
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && all_exclusive+=("$p")
+  done < <(jq_read ".forks[\"$fork_name\"].widget_entries[]? // empty")
 
   if [[ ${#all_exclusive[@]} -gt 0 ]]; then
     checkout_paths "$ref" "${all_exclusive[@]}"
-    git add "${all_exclusive[@]}"
+    git add -- "${all_exclusive[@]}"
     log "Phase 1 complete: ${#all_exclusive[@]} path(s) pulled"
   else
     log "Phase 1: No exclusive paths defined"
@@ -179,7 +185,10 @@ for fork_name in "${SYNC_ORDER[@]}"; do
   # -----------------------------------------------------------------------
   log "--- Phase 2: Core touchpoints ---"
 
-  mapfile -t touchpoints < <(jq_read ".forks[\"$fork_name\"].core_touchpoints[]? // empty")
+  touchpoints=()
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && touchpoints+=("$p")
+  done < <(jq_read ".forks[\"$fork_name\"].core_touchpoints[]? // empty")
 
   if [[ ${#touchpoints[@]} -eq 0 ]]; then
     log "Phase 2: No touchpoints defined, skipping"
