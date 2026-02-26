@@ -76,18 +76,24 @@ def fetch_remote(remote, branch):
 
 
 def checkout_paths(ref, paths):
+    """Check out paths from ref. Returns list of paths that were actually pulled."""
+    pulled = []
     for path in paths:
-        # Check if path exists in the ref
-        check = git_output("ls-tree", "--name-only", "-r", ref, "--", path)
-        if check is None or check == "":
-            # Also try ls-tree without -r for directories
-            check = git_output("ls-tree", "--name-only", ref, "--", path)
-        if check is None or check == "":
+        # Check if path exists in the ref (try recursive first, then top-level for dirs)
+        found = False
+        for ls_args in [("ls-tree", "--name-only", "-r", ref, "--", path),
+                        ("ls-tree", "--name-only", ref, "--", path)]:
+            check = git_output(*ls_args)
+            if check is not None and check != "":
+                found = True
+                break
+        if not found:
             warn(f"  Path not found in {ref}: {path} (skipping)")
             continue
 
         log(f"  Pulling: {path}")
         if DRY_RUN:
+            pulled.append(path)
             continue
 
         # Ensure parent directory exists
@@ -97,7 +103,13 @@ def checkout_paths(ref, paths):
         else:
             full.parent.mkdir(parents=True, exist_ok=True)
 
-        git("checkout", ref, "--", path)
+        result = git("checkout", ref, "--", path, check=False, capture=True)
+        if result.returncode == 0:
+            pulled.append(path)
+        else:
+            warn(f"  git checkout failed for {path}: {result.stderr.strip()}")
+
+    return pulled
 
 
 def find_claude():
@@ -244,9 +256,12 @@ def main():
         all_exclusive = [p for p in exclusive + widgets if p]
 
         if all_exclusive:
-            checkout_paths(ref, all_exclusive)
-            git("add", "--", *all_exclusive)
-            log(f"Phase 1 complete: {len(all_exclusive)} path(s) pulled")
+            pulled = checkout_paths(ref, all_exclusive)
+            if pulled:
+                git("add", "--", *pulled)
+                log(f"Phase 1 complete: {len(pulled)} path(s) pulled")
+            else:
+                warn("Phase 1: No paths were successfully pulled")
         else:
             log("Phase 1: No exclusive paths defined")
 

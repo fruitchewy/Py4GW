@@ -33,8 +33,7 @@
       ],
 
       "widget_entries": [
-        "Widgets/Guild Wars/Items & Loot/LootEx.py",
-        "Widgets/Guild Wars/Items & Loot/Config/LootEx/"
+        "Widgets/Guild Wars/Items & Loot/LootEx.py"
       ],
 
       "core_touchpoints": [
