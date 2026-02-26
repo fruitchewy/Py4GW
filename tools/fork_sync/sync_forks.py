@@ -152,33 +152,34 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
     log(f"  Tools string: {tools_str}")
     log(f"  Max turns: {max_turns}, Timeout: {timeout_minutes} min")
 
+    # Stream output live so the user can see what Claude is doing.
+    # Capture stderr to a buffer so we can check for "Reached max turns".
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd, cwd=REPO_ROOT,
-            timeout=timeout_minutes * 60,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=None,   # inherit — streams live to terminal
+            stderr=subprocess.PIPE,
             encoding="utf-8",
             errors="replace",
         )
+        _, stderr_text = proc.communicate(timeout=timeout_minutes * 60)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         warn(f"Claude Code timed out after {timeout_minutes} minutes")
         return False
 
-    # Print Claude's output so the user can see what happened
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
+    if stderr_text:
+        print(stderr_text, file=sys.stderr)
 
     # Check for failure indicators
-    all_output = (result.stdout or "") + (result.stderr or "")
-    if "Reached max turns" in all_output:
+    if "Reached max turns" in (stderr_text or ""):
         warn(f"Claude Code hit max turns ({max_turns}) — likely did not finish")
         return False
 
-    if result.returncode != 0:
-        warn(f"Claude Code exited with code {result.returncode}")
+    if proc.returncode != 0:
+        warn(f"Claude Code exited with code {proc.returncode}")
         return False
 
     # Verify Claude actually staged something
