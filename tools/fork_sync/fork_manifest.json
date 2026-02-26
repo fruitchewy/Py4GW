@@ -1,0 +1,55 @@
+{
+  "$schema": "Fork dependency manifest for Py4GW multi-fork sync strategy",
+  "$doc": [
+    "Each fork entry declares what exclusive content to pull and what shared files may need reconciliation.",
+    "exclusive_paths: directories/files owned entirely by this fork — pulled via git checkout, no merge needed.",
+    "core_touchpoints: shared upstream files this fork may modify — these require intelligent merge via Claude Code.",
+    "widget_entries: widget files that serve as entry points (pulled like exclusive_paths but live outside the lib dir).",
+    "The sync script processes exclusive_paths with plain git, then hands core_touchpoints to Claude Code for review."
+  ],
+
+  "upstream": {
+    "remote": "origin",
+    "url": "https://github.com/fruitchewy/Py4GW.git",
+    "branch": "main"
+  },
+
+  "forks": {
+    "frenkey-derp": {
+      "remote": "frenkey",
+      "url": "https://github.com/frenkey-derp/Py4GW.git",
+      "branch": "mods_port",
+      "description": "LootEx automated loot management + ItemHandling + Scripts",
+
+      "exclusive_paths": [
+        "Sources/frenkeyLib/LootEx/",
+        "Sources/frenkeyLib/ItemHandling/",
+        "Sources/frenkeyLib/Scripts/"
+      ],
+
+      "widget_entries": [
+        "Widgets/Guild Wars/Items & Loot/LootEx.py",
+        "Widgets/Guild Wars/Items & Loot/Config/LootEx/"
+      ],
+
+      "core_touchpoints": [
+        "Py4GWCoreLib/enums_src/Multiboxing_enums.py",
+        "Widgets/System/Messaging.py"
+      ],
+
+      "notes": "The enum LootEx=999 and its no-op handler already exist upstream. If upstream stays current, core_touchpoints may need no action."
+    }
+  },
+
+  "sync_order": [
+    "frenkey-derp"
+  ],
+
+  "sync_options": {
+    "auto_commit": true,
+    "commit_prefix": "[fork-sync]",
+    "use_claude_for_touchpoints": true,
+    "claude_max_turns": 10,
+    "claude_allowed_tools": "Bash(git diff *),Bash(git log *),Bash(git show *),Read,Edit,Grep,Glob"
+  }
+}
