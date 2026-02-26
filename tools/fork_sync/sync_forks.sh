@@ -3,15 +3,15 @@
 # sync_forks.sh — Pull fork-exclusive content and reconcile shared touchpoints.
 #
 # Usage:
-#   ./sync_forks.sh [--dry-run] [--no-claude] [--fork <name>] [--manifest <path>]
+#   ./sync_forks.sh [--dry-run] [--no-claude] [--fork <name>] [--manifest <path>] [--repo <path>]
 #
 # Requires: git, jq, claude (Claude Code CLI — only for touchpoint reconciliation)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 MANIFEST="${SCRIPT_DIR}/fork_manifest.json"
+REPO_ROOT=""
 
 DRY_RUN=false
 NO_CLAUDE=false
@@ -26,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --no-claude) NO_CLAUDE=true; shift ;;
     --fork)      FORK_FILTER="$2"; shift 2 ;;
     --manifest)  MANIFEST="$2"; shift 2 ;;
+    --repo)      REPO_ROOT="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,/^$/s/^# //p' "$0"
       exit 0
@@ -33,6 +34,19 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# Resolve REPO_ROOT
+# ---------------------------------------------------------------------------
+if [[ -z "$REPO_ROOT" ]]; then
+  # Try to infer from script location (works when script lives inside the repo)
+  REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [[ -z "$REPO_ROOT" ]]; then
+  # Fall back to current directory
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+[[ -n "$REPO_ROOT" ]] || die "Could not find git repo. Use --repo <path> or run from inside the repo."
 
 # ---------------------------------------------------------------------------
 # Helpers
