@@ -163,13 +163,13 @@ def main():
     script_dir = Path(__file__).resolve().parent
 
     # Resolve manifest
-    manifest_path = Path(args.manifest) if args.manifest else script_dir / "fork_manifest.json"
+    manifest_path = Path(args.manifest).expanduser().resolve() if args.manifest else script_dir / "fork_manifest.json"
     if not manifest_path.exists():
         die(f"Manifest not found: {manifest_path}")
 
     # Resolve repo root
     if args.repo:
-        REPO_ROOT = str(Path(args.repo).resolve())
+        REPO_ROOT = str(Path(args.repo).expanduser().resolve())
     else:
         # Try from script location
         result = git_output("rev-parse", "--show-toplevel", cwd=str(script_dir))
@@ -182,6 +182,8 @@ def main():
             REPO_ROOT = result
     if not REPO_ROOT:
         die("Could not find git repo. Use --repo <path> or run from inside the repo.")
+    if not Path(REPO_ROOT).is_dir():
+        die(f"Repo path does not exist: {REPO_ROOT}")
 
     log(f"Repo root: {REPO_ROOT}")
 
