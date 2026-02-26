@@ -134,18 +134,20 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
     if not claude_cmd:
         return False
 
+    # --allowedTools takes each tool as a separate argument, not comma-separated
     cmd = [
         claude_cmd, "-p", prompt,
         "--append-system-prompt-file", str(system_prompt_file),
         "--max-turns", str(max_turns),
         "--output-format", "text",
         "--verbose",
-        "--dangerously-skip-permissions",
     ]
+    for tool in allowed_tools:
+        cmd.extend(["--allowedTools", tool])
 
     log("Invoking Claude Code for touchpoint reconciliation ...")
     log(f"  Timeout: {timeout_minutes} minutes")
-    log(f"  Command: {' '.join(cmd[:6])} ...")
+    log(f"  Allowed tools: {allowed_tools}")
 
     try:
         result = subprocess.run(
@@ -222,7 +224,7 @@ def main():
     commit_prefix = opts.get("commit_prefix", "[fork-sync]")
     use_claude = opts.get("use_claude_for_touchpoints", True)
     claude_max_turns = opts.get("claude_max_turns", 10)
-    claude_tools = opts.get("claude_allowed_tools", "Read,Edit,Grep,Glob")
+    claude_tools = opts.get("claude_allowed_tools", ["Read", "Edit", "Grep", "Glob"])
 
     if args.no_claude:
         use_claude = False
