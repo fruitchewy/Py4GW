@@ -50,6 +50,6 @@
     "commit_prefix": "[fork-sync]",
     "use_claude_for_touchpoints": true,
     "claude_max_turns": 10,
-    "claude_allowed_tools": "Bash(git diff *),Bash(git log *),Bash(git show *),Read,Edit,Grep,Glob"
+    "claude_allowed_tools": "Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git add *),Bash(git status),Read,Edit,Grep,Glob"
   }
 }

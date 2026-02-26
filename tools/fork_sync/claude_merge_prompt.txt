@@ -16,29 +16,45 @@ Your job is to reconcile the CORE TOUCHPOINT files — shared files that both
 upstream and the fork may have modified. These files are passed to you as
 arguments.
 
+## Conflict Resolution Policy
+
+Upstream is the AUTHORITY for shared code. The most common pattern is that
+upstream fixes a bug in a shared library file, and the fork hasn't incorporated
+that fix yet. Therefore:
+
+- For CONFLICTING changes to the same lines: KEEP UPSTREAM's version.
+- Only integrate fork content that is clearly an ADDITION (new enum values,
+  new handler cases, new imports for fork-specific features).
+- Never regress upstream fixes by overwriting them with older fork code.
+
 ## Instructions
 
 For each touchpoint file:
 
 1. Read the current (upstream-based) version of the file in the working tree.
-2. Run `git diff <fork_remote>/<fork_branch> -- <file>` to see what the fork changed.
-3. Determine if the fork's changes are ALREADY present in our version (e.g. enum
-   values, handler stubs that were upstreamed). If so, skip — no action needed.
-4. If the fork has additions that are MISSING from our version, integrate them:
+2. Run `git show <fork_remote>/<fork_branch>:<file>` to see the fork's full version.
+3. Run `git diff <fork_remote>/<fork_branch> -- <file>` to see a line-level diff.
+4. Classify each difference as one of:
+   a. ALREADY PRESENT — fork's content exists in our version (e.g. enum values,
+      handler stubs that were upstreamed). Skip — no action needed.
+   b. FORK ADDITION — new content in the fork that doesn't exist upstream (e.g.
+      a new enum value, a new case handler for a fork feature). Integrate it.
+   c. UPSTREAM FIX — upstream changed a line that the fork still has the old
+      version of. KEEP upstream's version. Do not regress.
+   d. TRUE CONFLICT — both sides changed the same code in different ways for
+      different reasons. KEEP upstream's version and FLAG it for human review.
+5. When integrating fork additions:
    - For enum files: add the new enum values in the appropriate location.
    - For handler/dispatch files: add the new case handlers.
    - For any file: preserve upstream's existing content and formatting.
-5. If the fork has changes that CONFLICT with upstream changes to the same lines,
-   apply the fork's version but flag it in your output so the user can review.
-6. Never remove upstream content unless the fork explicitly deletes something
-   that was fork-specific to begin with.
+6. Never remove or overwrite upstream content.
 
 ## Output
 
 After processing all touchpoint files, print a summary:
 - Which files were modified and what was added/changed.
 - Which files needed no changes (fork content already present).
-- Any conflicts or ambiguities that need human review.
+- Any conflicts or upstream fixes preserved (where the fork had older code).
 
 Then stage the modified files with `git add`.
 
