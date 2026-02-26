@@ -18,43 +18,48 @@ arguments.
 
 ## Conflict Resolution Policy
 
+The calling script passes a CONFLICT POLICY in the prompt. Read it carefully.
+
+There are two modes:
+
+### prefer_upstream (external forks)
 Upstream is the AUTHORITY for shared code. The most common pattern is that
 upstream fixes a bug in a shared library file, and the fork hasn't incorporated
-that fix yet. Therefore:
+that fix yet. On conflicts, keep upstream. Only integrate clearly additive
+content from the fork (new enums, new handlers, new imports).
 
-- For CONFLICTING changes to the same lines: KEEP UPSTREAM's version.
-- Only integrate fork content that is clearly an ADDITION (new enum values,
-  new handler cases, new imports for fork-specific features).
-- Never regress upstream fixes by overwriting them with older fork code.
+### prefer_source (user's own branches)
+The source branch is the AUTHORITY. The user intentionally made these corelib
+changes. On conflicts, keep the source branch version. Upstream main is the
+base being patched, not the authority.
 
 ## Instructions
 
 For each touchpoint file:
 
 1. Read the current (upstream-based) version of the file in the working tree.
-2. Run `git show <fork_remote>/<fork_branch>:<file>` to see the fork's full version.
+2. Run `git show <fork_remote>/<fork_branch>:<file>` to see the source's full version.
 3. Run `git diff <fork_remote>/<fork_branch> -- <file>` to see a line-level diff.
 4. Classify each difference as one of:
-   a. ALREADY PRESENT — fork's content exists in our version (e.g. enum values,
-      handler stubs that were upstreamed). Skip — no action needed.
-   b. FORK ADDITION — new content in the fork that doesn't exist upstream (e.g.
-      a new enum value, a new case handler for a fork feature). Integrate it.
-   c. UPSTREAM FIX — upstream changed a line that the fork still has the old
-      version of. KEEP upstream's version. Do not regress.
-   d. TRUE CONFLICT — both sides changed the same code in different ways for
-      different reasons. KEEP upstream's version and FLAG it for human review.
-5. When integrating fork additions:
+   a. ALREADY PRESENT — source's content exists in our version. Skip.
+   b. SOURCE ADDITION — new content in the source that doesn't exist in our
+      version (e.g. a new enum value, a new handler, new logic). Integrate it.
+   c. ONE-SIDED FIX — one side changed a line the other still has the old
+      version of. Apply the conflict policy to decide which to keep.
+   d. TRUE CONFLICT — both sides changed the same code differently.
+      Apply the conflict policy. FLAG it for human review regardless.
+5. When integrating additions:
    - For enum files: add the new enum values in the appropriate location.
    - For handler/dispatch files: add the new case handlers.
-   - For any file: preserve upstream's existing content and formatting.
-6. Never remove or overwrite upstream content.
+   - For any file: preserve the winning side's content and formatting.
+6. Do not remove content from the winning side.
 
 ## Output
 
 After processing all touchpoint files, print a summary:
 - Which files were modified and what was added/changed.
 - Which files needed no changes (fork content already present).
-- Any conflicts or upstream fixes preserved (where the fork had older code).
+- Any conflicts found and how they were resolved (per the conflict policy).
 
 Then stage the modified files with `git add`.
 

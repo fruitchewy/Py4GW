@@ -129,6 +129,7 @@ for fork_name in "${SYNC_ORDER[@]}"; do
   remote=$(jq_read ".forks[\"$fork_name\"].remote")
   url=$(jq_read ".forks[\"$fork_name\"].url")
   branch=$(jq_read ".forks[\"$fork_name\"].branch")
+  conflict_policy=$(jq_read ".forks[\"$fork_name\"].conflict_policy // \"prefer_upstream\"")
   ref="$remote/$branch"
 
   # Setup remote and fetch
@@ -197,8 +198,18 @@ for fork_name in "${SYNC_ORDER[@]}"; do
       if [[ "$USE_CLAUDE" == "true" ]]; then
         log "Invoking Claude Code for touchpoint reconciliation ..."
 
-        # Build the prompt with file list
-        tp_prompt="Reconcile these core touchpoint files between upstream and fork '$fork_name' (remote: $ref). Files to check: $touchpoint_args"
+        # Build the prompt with file list and conflict policy
+        if [[ "$conflict_policy" == "prefer_source" ]]; then
+          policy_text="CONFLICT POLICY: prefer_source — This is the user's OWN branch. Their changes are intentional. On conflicts, KEEP THE SOURCE BRANCH version. Upstream main is the base to add to, not the authority."
+        else
+          policy_text="CONFLICT POLICY: prefer_upstream — This is an EXTERNAL fork. Upstream likely has newer fixes. On conflicts, KEEP UPSTREAM's version. Only integrate clearly additive content from the fork."
+        fi
+
+        tp_prompt="Reconcile these core touchpoint files between upstream (main) and source '$fork_name' (remote: $ref).
+
+$policy_text
+
+Files to check: $touchpoint_args"
 
         claude -p "$tp_prompt" \
           --append-system-prompt-file "${SCRIPT_DIR}/claude_merge_prompt.txt" \
