@@ -309,12 +309,19 @@ def main():
         # -------------------------------------------------------------------
         log("--- Phase 2: Core touchpoints ---")
 
-        # Auto-detect: find ALL files that differ between upstream and the
-        # fork, then exclude the exclusive_paths (already handled in Phase 1).
-        # Whatever remains is a touchpoint — shared files the fork modified.
+        # Auto-detect touchpoints: find files the FORK changed since it
+        # diverged from upstream. Uses merge-base so we only see the fork's
+        # changes, not every file where upstream moved ahead of the fork.
         explicit_touchpoints = [p for p in fork.get("core_touchpoints", []) if p]
 
-        diff_files_raw = git_output("diff", "--name-only", ref)
+        merge_base = git_output("merge-base", "HEAD", ref)
+        if merge_base:
+            diff_files_raw = git_output("diff", "--name-only", merge_base, ref)
+        else:
+            # No common ancestor — fall back to direct diff
+            warn("No merge-base found, falling back to direct diff (may list too many files)")
+            diff_files_raw = git_output("diff", "--name-only", ref)
+
         if diff_files_raw:
             all_differing = [f for f in diff_files_raw.splitlines() if f.strip()]
         else:
