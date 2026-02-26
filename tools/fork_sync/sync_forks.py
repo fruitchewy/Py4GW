@@ -143,46 +143,30 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
         "--append-system-prompt-file", str(system_prompt_file),
         "--allowedTools", tools_str,
         "--max-turns", str(max_turns),
-        "--output-format", "text",
         "--verbose",
     ]
 
     log("Invoking Claude Code for touchpoint reconciliation ...")
-    log(f"  Command: {' '.join(cmd[:6])} ... (truncated)")
-    log(f"  Tools string: {tools_str}")
+    log(f"  Tools: {tools_str}")
     log(f"  Max turns: {max_turns}, Timeout: {timeout_minutes} min")
 
-    # Stream output live so the user can see what Claude is doing.
-    # Capture stderr to a buffer so we can check for "Reached max turns".
+    # Let EVERYTHING stream to terminal — stdout AND stderr.
+    # No buffering, no capturing. User sees exactly what Claude sees.
     try:
-        proc = subprocess.Popen(
+        rc = subprocess.call(
             cmd, cwd=REPO_ROOT,
             stdin=subprocess.DEVNULL,
-            stdout=None,   # inherit — streams live to terminal
-            stderr=subprocess.PIPE,
-            encoding="utf-8",
-            errors="replace",
+            timeout=timeout_minutes * 60,
         )
-        _, stderr_text = proc.communicate(timeout=timeout_minutes * 60)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
         warn(f"Claude Code timed out after {timeout_minutes} minutes")
         return False
 
-    if stderr_text:
-        print(stderr_text, file=sys.stderr)
-
-    # Check for failure indicators
-    if "Reached max turns" in (stderr_text or ""):
-        warn(f"Claude Code hit max turns ({max_turns}) — likely did not finish")
+    if rc != 0:
+        warn(f"Claude Code exited with code {rc}")
         return False
 
-    if proc.returncode != 0:
-        warn(f"Claude Code exited with code {proc.returncode}")
-        return False
-
-    # Verify Claude actually staged something
+    # Check if Claude staged anything
     staged = git("diff", "--cached", "--quiet", check=False, capture=True)
     if staged.returncode == 0:
         log("Claude Code ran but made no changes (may be correct if touchpoints are already in sync)")
