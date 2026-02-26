@@ -71,7 +71,7 @@
     "auto_commit": true,
     "commit_prefix": "[fork-sync]",
     "use_claude_for_touchpoints": true,
-    "claude_max_turns": 10,
+    "claude_max_turns": 20,
     "claude_allowed_tools": [
       "Bash(git *)",
       "Read",

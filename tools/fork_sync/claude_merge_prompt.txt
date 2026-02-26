@@ -33,13 +33,21 @@ The source branch is the AUTHORITY. The user intentionally made these corelib
 changes. On conflicts, keep the source branch version. Upstream main is the
 base being patched, not the authority.
 
+## Efficiency
+
+Be decisive. Process ALL touchpoint files within a few turns. For each file:
+read it, check the diff, decide, act (or skip). Do not deliberate extensively.
+If the fork's additions are already present in upstream, just say so and move
+on. The common case is that no edits are needed — handle that quickly.
+
 ## Instructions
 
 For each touchpoint file:
 
 1. Read the current (upstream-based) version of the file in the working tree.
-2. Run `git show <fork_remote>/<fork_branch>:<file>` to see the source's full version.
-3. Run `git diff <fork_remote>/<fork_branch> -- <file>` to see a line-level diff.
+2. Run `git diff <fork_remote>/<fork_branch> -- <file>` to see a line-level diff.
+   If the diff only shows the fork MISSING upstream content (i.e. upstream has
+   lines the fork doesn't), that means upstream is ahead — no action needed.
 4. Classify each difference as one of:
    a. ALREADY PRESENT — source's content exists in our version. Skip.
    b. SOURCE ADDITION — new content in the source that doesn't exist in our
