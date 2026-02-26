@@ -129,7 +129,11 @@ def find_claude():
 
 
 def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_minutes=5):
-    """Invoke Claude Code CLI for touchpoint reconciliation."""
+    """Invoke Claude Code CLI for touchpoint reconciliation.
+
+    Returns True only if Claude ran and git status shows staged changes.
+    Returns False on any error, timeout, or if Claude made no changes.
+    """
     claude_cmd = find_claude()
     if not claude_cmd:
         return False
@@ -154,15 +158,36 @@ def run_claude(prompt, system_prompt_file, allowed_tools, max_turns, timeout_min
             cmd, cwd=REPO_ROOT,
             timeout=timeout_minutes * 60,
             stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
     except subprocess.TimeoutExpired:
         warn(f"Claude Code timed out after {timeout_minutes} minutes")
         return False
 
+    # Print Claude's output so the user can see what happened
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+
+    # Check for failure indicators
+    all_output = (result.stdout or "") + (result.stderr or "")
+    if "Reached max turns" in all_output:
+        warn(f"Claude Code hit max turns ({max_turns}) — likely did not finish")
+        return False
+
     if result.returncode != 0:
         warn(f"Claude Code exited with code {result.returncode}")
         return False
-    log("Claude Code reconciliation complete")
+
+    # Verify Claude actually staged something
+    staged = git("diff", "--cached", "--quiet", check=False, capture=True)
+    if staged.returncode == 0:
+        log("Claude Code ran but made no changes (may be correct if touchpoints are already in sync)")
+    else:
+        log("Claude Code reconciliation complete — changes staged")
+
     return True
 
 
@@ -303,47 +328,44 @@ def main():
             if not needs_work:
                 log("Phase 2: All touchpoints already in sync")
 
-            elif use_claude and find_claude():
-                # Build prompt with conflict policy
-                if conflict_policy == "prefer_source":
-                    policy = (
-                        "CONFLICT POLICY: prefer_source — This is the user's OWN branch. "
-                        "Their changes are intentional. On conflicts, KEEP THE SOURCE BRANCH "
-                        "version. Upstream main is the base to add to, not the authority."
-                    )
-                else:
-                    policy = (
-                        "CONFLICT POLICY: prefer_upstream — This is an EXTERNAL fork. "
-                        "Upstream likely has newer fixes. On conflicts, KEEP UPSTREAM's "
-                        "version. Only integrate clearly additive content from the fork."
-                    )
-
-                file_list = " ".join(needs_work)
-                prompt = (
-                    f"Reconcile these core touchpoint files between upstream (main) "
-                    f"and source '{fork_name}' (remote: {ref}).\n\n"
-                    f"{policy}\n\n"
-                    f"Files to check: {file_list}"
-                )
-
-                system_prompt_file = script_dir / "claude_merge_prompt.txt"
-                if not run_claude(prompt, system_prompt_file, claude_tools, claude_max_turns):
-                    warn("Claude Code failed. Printing diffs for manual review.")
-                    for tp in needs_work:
-                        print(f"--- {tp} ---")
-                        git("diff", ref, "--", tp)
-                        print()
-                    warn(f"Manual reconciliation needed for: {file_list}")
             else:
-                if use_claude:
-                    warn("Claude Code CLI not found. Falling back to diff-only mode.")
-                log("Printing diffs for manual review:")
                 file_list = " ".join(needs_work)
-                for tp in needs_work:
-                    print(f"--- {tp} ---")
-                    git("diff", ref, "--", tp)
-                    print()
-                warn(f"Manual reconciliation needed for: {file_list}")
+                claude_succeeded = False
+
+                if use_claude and find_claude():
+                    # Build prompt with conflict policy
+                    if conflict_policy == "prefer_source":
+                        policy = (
+                            "CONFLICT POLICY: prefer_source — This is the user's OWN branch. "
+                            "Their changes are intentional. On conflicts, KEEP THE SOURCE BRANCH "
+                            "version. Upstream main is the base to add to, not the authority."
+                        )
+                    else:
+                        policy = (
+                            "CONFLICT POLICY: prefer_upstream — This is an EXTERNAL fork. "
+                            "Upstream likely has newer fixes. On conflicts, KEEP UPSTREAM's "
+                            "version. Only integrate clearly additive content from the fork."
+                        )
+
+                    prompt = (
+                        f"Reconcile these core touchpoint files between upstream (main) "
+                        f"and source '{fork_name}' (remote: {ref}).\n\n"
+                        f"{policy}\n\n"
+                        f"Files to check: {file_list}"
+                    )
+
+                    system_prompt_file = script_dir / "claude_merge_prompt.txt"
+                    claude_succeeded = run_claude(prompt, system_prompt_file, claude_tools, claude_max_turns)
+                elif use_claude:
+                    warn("Claude Code CLI not found.")
+
+                # If Claude didn't run or failed, always show diffs for manual review
+                if not claude_succeeded:
+                    log("Printing diffs for manual review:")
+                    for tp in needs_work:
+                        print(f"\n--- {tp} ---")
+                        git("diff", ref, "--", tp)
+                    warn(f"Manual reconciliation needed for: {file_list}")
 
         # -------------------------------------------------------------------
         # Phase 3: Commit (if auto_commit enabled)
