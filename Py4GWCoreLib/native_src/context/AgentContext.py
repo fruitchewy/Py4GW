@@ -12,7 +12,7 @@ from ..internals.gw_array import GW_Array, GW_Array_Value_View
 from ..internals.gw_list import GW_TList, GW_TList_View, GW_TLink
 from typing import List, Optional
 from ..internals.native_symbol import NativeSymbol
-from ...Scanner import ScannerSection
+from ...Scanner import Scanner, ScannerSection
 from dataclasses import dataclass
 
 # ---------------------------------------------------------------------
@@ -1319,13 +1319,19 @@ class AgentArrayStruct(Structure):
     
     
     
-AgentArray_GetPtr = NativeSymbol(
-    name="GetInstanceInfoPtr",
-    pattern=b"\x8b\x0c\x90\x85\xc9\x74\x19",
-    mask="xxxxxxx",
-    offset=-0x4,  
-    section=ScannerSection.TEXT
-)
+from ..internals.scan_resolver import resolve_scan
+
+_agent_array_addr = resolve_scan("AgentArray_GetPtr",
+    lambda: Scanner.Find(
+        b"\x8b\x0c\x90\x85\xc9\x74\x19", "xxxxxxx", -0x4, ScannerSection.TEXT))
+AgentArray_GetPtr: NativeSymbol | None = None
+if _agent_array_addr:
+    try:
+        AgentArray_GetPtr = NativeSymbol.__new__(NativeSymbol)
+        AgentArray_GetPtr.name = "AgentArray_GetPtr"
+        AgentArray_GetPtr.addr = _agent_array_addr
+    except Exception:
+        AgentArray_GetPtr = None
 
 #region facade
 class AgentArray:
@@ -1340,6 +1346,10 @@ class AgentArray:
         return AgentArray._ptr    
     @staticmethod
     def _update_ptr():
+        if AgentArray_GetPtr is None:
+            AgentArray._ptr = 0
+            AgentArray._cached_ctx = None
+            return
         ptr = AgentArray_GetPtr.read_ptr()
         AgentArray._ptr = ptr
         if not ptr:

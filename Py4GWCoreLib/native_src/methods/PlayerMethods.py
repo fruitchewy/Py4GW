@@ -1,11 +1,12 @@
 from ...Scanner import ScannerSection
 from ..internals.prototypes import Prototypes
 from ..internals.native_function import NativeFunction
+from ..internals.scan_resolver import resolve_scan
 
 from ...enums_src.UI_enums import UIMessage
 from ...Scanner import Scanner
 import ctypes
-from typing import List
+from typing import List, Optional
 from Py4GW import Game
 
 class WorldActionId:
@@ -15,59 +16,93 @@ class WorldActionId:
     InteractItem = 3
     InteractTrade = 4
     InteractGadget = 5
- 
-# ------------------------------
-# MoveTo
-# ------------------------------
 
-MoveTo_Func = NativeFunction(
-    name="MoveTo_Func", #GWCA name
-    pattern=b"\x83\xc4\x0c\x85\xff\x74\x0b\x56\x6a\x03",
-    mask="xxxxxxxxxx",
-    offset=-0x5,
-    section=ScannerSection.TEXT,
-    prototype=Prototypes["Void_FloatPtr"],
-    use_near_call=True,
+
+# --- MoveTo ---
+# No viable assertion anchor — the AgApi.cpp wrapper doesn't call MoveTo directly.
+# Pattern-only for now.
+def _resolve_moveto_pattern() -> int:
+    addr = Scanner.Find(
+        b"\x83\xc4\x0c\x85\xff\x74\x0b\x56\x6a\x03", "xxxxxxxxxx",
+        -0x5, ScannerSection.TEXT)
+    if not addr:
+        return 0
+    return Scanner.FunctionFromNearCall(addr, True)
+
+_moveto_addr = resolve_scan("MoveTo", _resolve_moveto_pattern)
+MoveTo_Func: Optional[NativeFunction] = (
+    NativeFunction.from_address(
+        name="MoveTo_Func",
+        address=_moveto_addr,
+        prototype=Prototypes["Void_FloatPtr"],
+    ) if _moveto_addr else None
 )
 
-# ------------------------------
-# DepositFaction
-# ------------------------------
 
-DepositFaction_Func = NativeFunction(
-    name="DepositFaction_Func",
-    pattern=b"\x68\x88\x13\x00\x00\xff\x76\x0c\x6a\x00",
-    mask="xxxxxxxxxx",
-    offset=0xA,
-    section=ScannerSection.TEXT,
-    prototype=Prototypes["Void_U32_U32_U32"],
+# --- DepositFaction ---
+# Primary: unique assertion in the deposit event handler
+# Fallback: legacy byte pattern
+def _resolve_deposit_assertion() -> int:
+    assertion = Scanner.FindAssertion(
+        "VnGuildAdjustFaction.cpp", "msg.notifyParam", 0, 0)
+    if not assertion:
+        return 0
+    handler_fn = Scanner.ToFunctionStart(assertion, 0xFFF)
+    if not handler_fn:
+        return 0
+    # Within the handler, find push 0x1388 (5000) — the deposit amount constant.
+    # The CALL to the deposit function follows at +0xA from the push.
+    push_5000 = Scanner.FindInRange(
+        b"\x68\x88\x13\x00\x00", "xxxxx", 0,
+        handler_fn, handler_fn + 0x200)
+    if not push_5000:
+        return 0
+    return push_5000 + 0xA
+
+_deposit_addr = resolve_scan("DepositFaction", _resolve_deposit_assertion)
+DepositFaction_Func: Optional[NativeFunction] = (
+    NativeFunction.from_address(
+        name="DepositFaction_Func",
+        address=_deposit_addr,
+        prototype=Prototypes["Void_U32_U32_U32"],
+    ) if _deposit_addr else None
 )
 
-# ------------------------------
-# SetActiveTitle
-# ------------------------------
-sat_assertion = Scanner.FindAssertion("AttribTitles.cpp","!*hdr.param",0,0,)
-sat_function_start = Scanner.ToFunctionStart(sat_assertion) 
-sat_find_in_range = Scanner.FindInRange(b"\xff\x76\x08\xe8","xxxx",3,
-                                        sat_function_start,sat_function_start+ 0x3ff,)
-SetActiveTitle_Func_ptr = Scanner.FunctionFromNearCall(sat_find_in_range)
 
-SetActiveTitle_Func = NativeFunction.from_address(
-    name="SetActiveTitle_Func",
-    address=SetActiveTitle_Func_ptr,
-    prototype=Prototypes["Void_U32"],
+# --- SetActiveTitle ---
+# Already assertion-based (HIGH resilience)
+_sat_addr = resolve_scan("SetActiveTitle", lambda: (
+    Scanner.FunctionFromNearCall(
+        Scanner.FindInRange(
+            b"\xff\x76\x08\xe8", "xxxx", 3,
+            Scanner.ToFunctionStart(
+                Scanner.FindAssertion("AttribTitles.cpp", "!*hdr.param", 0, 0)),
+            Scanner.ToFunctionStart(
+                Scanner.FindAssertion("AttribTitles.cpp", "!*hdr.param", 0, 0)) + 0x3FF))
+))
+SetActiveTitle_Func: Optional[NativeFunction] = (
+    NativeFunction.from_address(
+        name="SetActiveTitle_Func",
+        address=_sat_addr,
+        prototype=Prototypes["Void_U32"],
+    ) if _sat_addr else None
 )
 
-# ------------------------------
-# RemoveActiveTitle
-# ------------------------------
-RemoveActiveTitle_Func_ptr = Scanner.FindInRange(b"\x55\x8b\xec\x51","xxxx",0,
-                                        SetActiveTitle_Func_ptr + 0x10,SetActiveTitle_Func_ptr + 0xff)
 
-RemoveActiveTitle_Func = NativeFunction.from_address(
-    name="RemoveActiveTitle_Func",
-    address=RemoveActiveTitle_Func_ptr,
-    prototype=Prototypes["Void_NoArgs"],
+# --- RemoveActiveTitle ---
+# Relative to SetActiveTitle (MEDIUM resilience — depends on SetActiveTitle)
+_rat_addr = resolve_scan("RemoveActiveTitle", lambda: (
+    Scanner.FindInRange(
+        b"\x55\x8b\xec\x51", "xxxx", 0,
+        _sat_addr + 0x10, _sat_addr + 0xFF)
+    if _sat_addr else 0
+))
+RemoveActiveTitle_Func: Optional[NativeFunction] = (
+    NativeFunction.from_address(
+        name="RemoveActiveTitle_Func",
+        address=_rat_addr,
+        prototype=Prototypes["Void_NoArgs"],
+    ) if _rat_addr else None
 )
     
             
@@ -129,44 +164,44 @@ class PlayerMethods:
     @staticmethod
     def Move(x: float, y: float, zPlane: int = 0) -> None:
         def _action():
-            if not MoveTo_Func.is_valid():
+            if MoveTo_Func is None or not MoveTo_Func.is_valid():
                 return
 
             args = (ctypes.c_float * 4)()
             args[0] = x
             args[1] = y
             args[2] = float(zPlane)
-            args[3] = 0.0  # unknown, but required
+            args[3] = 0.0
 
             MoveTo_Func.directCall(args)
-        
-        Game.enqueue(_action)   
-        
+
+        Game.enqueue(_action)
+
     @staticmethod
     def DepositFaction(allegiance: int) -> None:
         def _action():
-            if not DepositFaction_Func.is_valid():
+            if DepositFaction_Func is None or not DepositFaction_Func.is_valid():
                 return
             DepositFaction_Func.directCall(0, allegiance, 5000)
-        
+
         Game.enqueue(_action)
-        
+
     @staticmethod
     def SetActiveTitle(title_id: int) -> None:
         def _action():
-            if not SetActiveTitle_Func.is_valid():
+            if SetActiveTitle_Func is None or not SetActiveTitle_Func.is_valid():
                 return
             SetActiveTitle_Func.directCall(title_id)
-        
+
         Game.enqueue(_action)
-        
+
     @staticmethod
     def RemoveActiveTitle() -> None:
         def _action():
-            if not RemoveActiveTitle_Func.is_valid():
+            if RemoveActiveTitle_Func is None or not RemoveActiveTitle_Func.is_valid():
                 return
             RemoveActiveTitle_Func.directCall()
-        
+
         Game.enqueue(_action)
         
     @staticmethod

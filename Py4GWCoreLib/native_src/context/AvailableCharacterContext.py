@@ -60,13 +60,20 @@ class AvailableCharacterArrayStruct(Structure):
     def available_characters_list(self) -> list[AvailableCharacterStruct]:
         return GW_Array_Value_View(self.available_characters_array, AvailableCharacterStruct).to_list()
 
-available_chars_ptr = NativeSymbol(
-    name="available_chars_ptr",
-    pattern=b"\x8b\x35\x00\x00\x00\x00\x57\x69\xF8\x84\x00\x00\x00",
-    mask="xx????xxxxxxx",
-    offset=0x2,  
-    section=ScannerSection.TEXT
-)
+from ..internals.scan_resolver import resolve_scan
+
+_avail_chars_addr = resolve_scan("AvailableChars_GetPtr",
+    lambda: Scanner.Find(
+        b"\x8b\x35\x00\x00\x00\x00\x57\x69\xF8\x84\x00\x00\x00",
+        "xx????xxxxxxx", 0x2, ScannerSection.TEXT))
+available_chars_ptr: NativeSymbol | None = None
+if _avail_chars_addr:
+    try:
+        available_chars_ptr = NativeSymbol.__new__(NativeSymbol)
+        available_chars_ptr.name = "available_chars_ptr"
+        available_chars_ptr.addr = _avail_chars_addr
+    except Exception:
+        available_chars_ptr = None
 
 class AvailableCharacterArray:
     _ptr: int = 0
@@ -79,6 +86,10 @@ class AvailableCharacterArray:
 
     @staticmethod
     def _update_ptr():
+        if available_chars_ptr is None:
+            AvailableCharacterArray._ptr = 0
+            AvailableCharacterArray._cached_ctx = None
+            return
         ptr = available_chars_ptr.read_ptr()
         AvailableCharacterArray._ptr = ptr
         if not ptr:

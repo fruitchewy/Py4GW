@@ -1,5 +1,7 @@
 from typing import Optional
 import PyScanner
+import ctypes
+import struct
 from enum import IntEnum
 
 class ScannerSection(IntEnum):
@@ -79,6 +81,21 @@ class Scanner:
         return Scanner._Scanner.ToFunctionStart(address, scan_range)
     
     @staticmethod
+    def ResolveNearBranch(address: int) -> int:
+        """
+        Resolve the target of an E8 CALL or E9 JMP without following
+        into the function body. Returns 0 on failure.
+        """
+        if not address:
+            return 0
+        buf = (ctypes.c_ubyte * 5)()
+        ctypes.memmove(buf, address, 5)
+        if buf[0] not in (0xE8, 0xE9):
+            return 0
+        disp = struct.unpack_from('<i', bytes(buf), 1)[0]
+        return address + 5 + disp
+
+    @staticmethod
     def IsValidPtr(address: int, section: int) -> bool:
         """
         Check whether 'address' is inside the memory range
@@ -132,3 +149,11 @@ class Scanner:
         Find the nth reference to a wide-character string.
         """
         return Scanner._Scanner.FindNthUseOfStringW(string, nth, offset, section)
+
+    @staticmethod
+    def GetScanStatus() -> dict:
+        """Return C++ scan results and hook statuses from GWCA initialization.
+
+        Returns dict with 'scans' ({name: address}) and 'hooks' ({name: mh_status}).
+        """
+        return Scanner._Scanner.GetScanStatus()

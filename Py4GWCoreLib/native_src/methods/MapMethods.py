@@ -1,7 +1,7 @@
-from ...Scanner import ScannerSection
+from ...Scanner import Scanner, ScannerSection
 from ..internals.prototypes import Prototypes
 from ..internals.native_function import NativeFunction
-from ..internals.native_symbol import NativeSymbol
+from ..internals.scan_resolver import resolve_scan
 from ...UIManager import UIManager
 from ...enums_src.UI_enums import UIMessage
 from ..context.GuildContext import Guild, GuildContext, GHKey
@@ -10,29 +10,37 @@ from typing import List, Optional
 from Py4GW import Game
 
 
-SkipCinematic_Func = NativeFunction(
-    name="SkipCinematic_Func", #GWCA name
-    pattern=b"\x8b\x40\x30\x83\x78\x04\x00",
-    mask="xxxxxxx",
-    offset=-0x5,
-    section=ScannerSection.TEXT,
-    prototype=Prototypes["Void_NoArgs"],
-    use_near_call=False,
+# --- SkipCinematic ---
+# Primary: assertion in CiCliApi.cpp (survives binary updates)
+# Fallback: legacy byte pattern
+_skip_addr = resolve_scan("SkipCinematic",
+    lambda: Scanner.ToFunctionStart(
+        Scanner.FindAssertion("CiCliApi.cpp", "context->script", 0, 0), 0xFFF))
+SkipCinematic_Func: Optional[NativeFunction] = (
+    NativeFunction.from_address(
+        name="SkipCinematic_Func",
+        address=_skip_addr,
+        prototype=Prototypes["Void_NoArgs"],
+    ) if _skip_addr else None
 )
 
-# Scan for: imul eax, esi, 0x7C; pop esi; add eax, <area_info_addr>
-# The 4-byte immediate at offset +5 is the AreaInfo array base.
-_area_info_symbol: Optional[NativeSymbol] = None
-try:
-    _area_info_symbol = NativeSymbol(
-        name="AreaInfoArray",
-        pattern=b"\x6B\xC6\x7C\x5E\x05",
-        mask="xxxxx",
-        offset=5,
-        section=ScannerSection.TEXT,
-    )
-except Exception:
-    pass
+
+# --- AreaInfoArray ---
+# GetAreaInfo body: bounds check → imul eax, <map_id>, 0x7C → add eax, <AreaInfoArray>
+# We extract the 4-byte immediate from the add instruction.
+def _resolve_area_info_assertion() -> int:
+    assertion = Scanner.FindAssertion(
+        "ConstMission.cpp", "index < arrsize(s_missionClientData)", 0, 0)
+    if not assertion:
+        return 0
+    func_start = Scanner.ToFunctionStart(assertion, 0xFFF)
+    if not func_start:
+        return 0
+    # add eax, <imm32> = opcode 0x05 followed by 4-byte address.
+    # offset=1 lands on the immediate operand.
+    return Scanner.FindInRange(b"\x05", "x", 1, func_start, func_start + 0x40)
+
+_area_info_addr: int = resolve_scan("AreaInfoArray", _resolve_area_info_assertion)
 
 class MapMethods:
     _GHKEY_SCRATCH = GHKey()
@@ -41,10 +49,10 @@ class MapMethods:
     def GetMapInfo(map_id: int):
         """Return AreaInfoStruct for any map_id (not just the current map)."""
         from ..context.InstanceInfoContext import AreaInfoStruct
-        if map_id <= 0 or not _area_info_symbol:
+        if map_id <= 0 or not _area_info_addr:
             return None
 
-        base = _area_info_symbol.read_ptr()
+        base = ctypes.cast(_area_info_addr, ctypes.POINTER(ctypes.c_uint32)).contents.value
         if not base:
             return None
 
@@ -57,9 +65,9 @@ class MapMethods:
     @staticmethod
     def SkipCinematic() -> bool:
         """Skip the current map cinematic."""
-        if not SkipCinematic_Func.is_valid():
+        if SkipCinematic_Func is None or not SkipCinematic_Func.is_valid():
             return False
-        
+
         SkipCinematic_Func()
         return True
 
@@ -124,7 +132,7 @@ class MapMethods:
             [0],
             False
         )
-        
+
     @staticmethod
     def LogouttoCharacterSelect() -> None:
         def _action():

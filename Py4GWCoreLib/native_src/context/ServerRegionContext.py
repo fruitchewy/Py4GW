@@ -23,13 +23,19 @@ class ServerRegionStruct(Structure):
         ("region_id", c_int32),      # +0x0000
     ]
     
-ServerRegion_GetPtr = NativeSymbol(
-    name="ServerRegion_GetPtr",
-    pattern=b"\x6a\x54\x8d\x46\x24\x89\x08",
-    mask="xxxxxxx",
-    offset=-0x4,  
-    section=ScannerSection.TEXT
-)
+from ..internals.scan_resolver import resolve_scan
+
+_server_region_addr = resolve_scan("ServerRegion_GetPtr",
+    lambda: Scanner.Find(
+        b"\x6a\x54\x8d\x46\x24\x89\x08", "xxxxxxx", -0x4, ScannerSection.TEXT))
+ServerRegion_GetPtr: NativeSymbol | None = None
+if _server_region_addr:
+    try:
+        ServerRegion_GetPtr = NativeSymbol.__new__(NativeSymbol)
+        ServerRegion_GetPtr.name = "ServerRegion_GetPtr"
+        ServerRegion_GetPtr.addr = _server_region_addr
+    except Exception:
+        ServerRegion_GetPtr = None
 
 #region facade
 class ServerRegion:
@@ -42,6 +48,10 @@ class ServerRegion:
         return ServerRegion._ptr    
     @staticmethod
     def _update_ptr():
+        if ServerRegion_GetPtr is None:
+            ServerRegion._ptr = 0
+            ServerRegion._cached_ctx = None
+            return
         ptr = ServerRegion_GetPtr.read_ptr()
         ServerRegion._ptr = ptr
         if not ptr:

@@ -1,4 +1,5 @@
 
+import ctypes
 import PyImGui
 import PyUIManager
 from typing import Dict, List
@@ -15,6 +16,18 @@ from typing import Any, TypedDict
 NPC_DIALOG_HASH    = 3856160816
 DEFAULT_OFFSET     = [2, 0, 0, 1]
 DIALOG_CHILD_OFFSET = list(DEFAULT_OFFSET)
+
+class _ButtonParam(ctypes.Structure):
+    _fields_ = [("unk", ctypes.c_uint32), ("wparam", ctypes.c_uint32), ("lparam", ctypes.c_uint32)]
+
+class _MouseAction(ctypes.Structure):
+    _fields_ = [
+        ("frame_id", ctypes.c_uint32),
+        ("child_offset_id", ctypes.c_uint32),
+        ("current_state", ctypes.c_uint32),
+        ("wparam", ctypes.c_uint32),
+        ("lparam", ctypes.c_uint32),
+    ]
 
 # —— Globals —————————————————
 
@@ -387,43 +400,67 @@ class UIManager:
     @staticmethod
     def SendUIMessageRaw(msgid: int, wparam: int, lparam: int, skip_hooks: bool = False ) -> bool:
         return PyUIManager.UIManager.SendUIMessageRaw(msgid, wparam, lparam, skip_hooks)
-    
-    @staticmethod
-    def FrameClick(frame_id):
-        """
-        Click a frame on the UI.
 
-        :param frame_id: The ID of the frame.
-        """
-        if not UIManager.FrameExists(frame_id):
-            return
-        PyUIManager.UIManager.button_click(frame_id)
-    
     @staticmethod
-    def TestMouseAction(frame_id, current_state, wparam_value, lparam_value=0):
-        """
-        Test mouse action on a frame.
+    def SendFrameUIMessage(frame_id: int, message_id: int, wparam: int, lparam: int = 0) -> bool:
+        return PyUIManager.UIManager.SendFrameUIMessage(frame_id, message_id, wparam, lparam)
 
-        :param frame_id: The ID of the frame.
-        :param current_state: The current state of the mouse.
-        :param wparam_value: The wparam value.
-        """
-        if not UIManager.FrameExists(frame_id):
-            return
-        PyUIManager.UIManager.test_mouse_action(frame_id, current_state, wparam_value, lparam_value)
-    
     @staticmethod
-    def TestMouseClickAction(frame_id, current_state, wparam_value, lparam_value=0):
-        """
-        Test mouse click action on a frame.
-
-        :param frame_id: The ID of the frame.
-        :param current_state: The current state of the mouse.
-        :param wparam_value: The wparam value.
-        """
+    def FrameClick(frame_id: int) -> bool:
+        """Click a UI frame button. Constructs kMouseAction with correct frame_id."""
         if not UIManager.FrameExists(frame_id):
-            return
-        PyUIManager.UIManager.test_mouse_click_action(frame_id, current_state, wparam_value, lparam_value)
+            return False
+        frame = PyUIManager.UIFrame(frame_id)
+        parent = PyUIManager.UIFrame(frame.parent_id)
+        if not parent.is_created:
+            return False
+        btn_param = _ButtonParam(unk=0, wparam=frame.field105_0x1c4, lparam=0)
+        action = _MouseAction(
+            frame_id=frame.frame_id,
+            child_offset_id=frame.child_offset_id,
+            current_state=7,  # MouseUp
+            wparam=ctypes.addressof(btn_param),
+            lparam=0,
+        )
+        return UIManager.SendFrameUIMessage(frame.parent_id, 0x31, ctypes.addressof(action))
+
+    @staticmethod
+    def TestMouseAction(frame_id: int, current_state: int, wparam_value: int = 0, lparam_value: int = 0) -> bool:
+        """Send kMouseClick2 (0x31) to a frame with correct frame_id in the action struct."""
+        if not UIManager.FrameExists(frame_id):
+            return False
+        frame = PyUIManager.UIFrame(frame_id)
+        parent = PyUIManager.UIFrame(frame.parent_id)
+        if not parent.is_created:
+            return False
+        btn_param = _ButtonParam(unk=0, wparam=wparam_value, lparam=lparam_value)
+        action = _MouseAction(
+            frame_id=frame.frame_id,
+            child_offset_id=frame.child_offset_id,
+            current_state=current_state,
+            wparam=ctypes.addressof(btn_param),
+            lparam=0,
+        )
+        return UIManager.SendFrameUIMessage(frame.parent_id, 0x31, ctypes.addressof(action))
+
+    @staticmethod
+    def TestMouseClickAction(frame_id: int, current_state: int, wparam_value: int = 0, lparam_value: int = 0) -> bool:
+        """Send kMouseClick (0x24) to a frame with correct frame_id in the action struct."""
+        if not UIManager.FrameExists(frame_id):
+            return False
+        frame = PyUIManager.UIFrame(frame_id)
+        parent = PyUIManager.UIFrame(frame.parent_id)
+        if not parent.is_created:
+            return False
+        btn_param = _ButtonParam(unk=0, wparam=wparam_value, lparam=lparam_value)
+        action = _MouseAction(
+            frame_id=frame.frame_id,
+            child_offset_id=frame.child_offset_id,
+            current_state=current_state,
+            wparam=ctypes.addressof(btn_param),
+            lparam=0,
+        )
+        return UIManager.SendFrameUIMessage(frame.parent_id, 0x24, ctypes.addressof(action))
     
     @staticmethod
     def GetRootFrameID():

@@ -118,13 +118,20 @@ class InstanceInfoStruct(Structure):
 # Native function locating InstanceInfoPtr
 # -------------------------------------------------------------
     
-InstanceInfo_GetPtr = NativeSymbol(
-    name="GetInstanceInfoPtr",
-    pattern=b"\x6A\x2C\x50\xE8\x00\x00\x00\x00\x83\xC4\x08\xC7",
-    mask="xxxx????xxxx",
-    offset=0x0D,  
-    section=ScannerSection.TEXT
-)
+from ..internals.scan_resolver import resolve_scan
+
+_instance_info_addr = resolve_scan("InstanceInfo_GetPtr",
+    lambda: Scanner.Find(
+        b"\x6A\x2C\x50\xE8\x00\x00\x00\x00\x83\xC4\x08\xC7",
+        "xxxx????xxxx", 0x0D, ScannerSection.TEXT))
+InstanceInfo_GetPtr: NativeSymbol | None = None
+if _instance_info_addr:
+    try:
+        InstanceInfo_GetPtr = NativeSymbol.__new__(NativeSymbol)
+        InstanceInfo_GetPtr.name = "InstanceInfo_GetPtr"
+        InstanceInfo_GetPtr.addr = _instance_info_addr
+    except Exception:
+        InstanceInfo_GetPtr = None
 
 
 #region facade
@@ -138,6 +145,10 @@ class InstanceInfo:
         return InstanceInfo._ptr    
     @staticmethod
     def _update_ptr():
+        if InstanceInfo_GetPtr is None:
+            InstanceInfo._ptr = 0
+            InstanceInfo._cached_ctx = None
+            return
         ptr = InstanceInfo_GetPtr.read_ptr()
         InstanceInfo._ptr = ptr
         if not ptr:
