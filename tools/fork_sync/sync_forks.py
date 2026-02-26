@@ -310,12 +310,48 @@ def main():
         # -------------------------------------------------------------------
         log("--- Phase 2: Core touchpoints ---")
 
-        touchpoints = [p for p in fork.get("core_touchpoints", []) if p]
+        # Auto-detect: find ALL files that differ between upstream and the
+        # fork, then exclude the exclusive_paths (already handled in Phase 1).
+        # Whatever remains is a touchpoint — shared files the fork modified.
+        explicit_touchpoints = [p for p in fork.get("core_touchpoints", []) if p]
+
+        diff_files_raw = git_output("diff", "--name-only", ref)
+        if diff_files_raw:
+            all_differing = [f for f in diff_files_raw.splitlines() if f.strip()]
+        else:
+            all_differing = []
+
+        # Filter out exclusive paths (already pulled in Phase 1)
+        def is_exclusive(filepath):
+            for ep in all_exclusive:
+                # ep can be "Sources/frenkeyLib/LootEx/" (dir) or a file
+                if ep.endswith("/"):
+                    if filepath.startswith(ep) or filepath.startswith(ep.rstrip("/")):
+                        return True
+                elif filepath == ep:
+                    return True
+            return False
+
+        detected_touchpoints = [f for f in all_differing if not is_exclusive(f)]
+
+        # Merge explicit + detected, deduplicate
+        touchpoints = list(dict.fromkeys(explicit_touchpoints + detected_touchpoints))
 
         if not touchpoints:
-            log("Phase 2: No touchpoints defined, skipping")
+            log("Phase 2: No touchpoint differences found")
         else:
-            # Check which touchpoints have differences
+            if detected_touchpoints:
+                log(f"  Auto-detected {len(detected_touchpoints)} touchpoint(s) outside exclusive paths:")
+                for tp in detected_touchpoints:
+                    log(f"    {tp}")
+            if explicit_touchpoints:
+                explicit_only = [t for t in explicit_touchpoints if t not in detected_touchpoints]
+                if explicit_only:
+                    log(f"  {len(explicit_only)} explicit touchpoint(s) from manifest (not in diff):")
+                    for tp in explicit_only:
+                        log(f"    {tp}")
+
+            # Check which touchpoints actually have differences
             needs_work = []
             for tp in touchpoints:
                 diff = git_output("diff", ref, "--", tp)
