@@ -317,68 +317,64 @@ def main():
         # -------------------------------------------------------------------
         log("--- Phase 2: Core touchpoints ---")
 
-        # Auto-detect touchpoints: find files the FORK changed since it
-        # diverged from upstream. Uses merge-base so we only see the fork's
-        # changes, not every file where upstream moved ahead of the fork.
-        explicit_touchpoints = [p for p in fork.get("core_touchpoints", []) if p]
-
+        # Find files the fork changed since it diverged from upstream.
         merge_base = git_output("merge-base", upstream_ref, ref)
-        if merge_base:
-            diff_files_raw = git_output("diff", "--name-only", merge_base, ref)
+        if not merge_base:
+            warn("No merge-base found between upstream and fork — skipping Phase 2")
         else:
-            # No common ancestor — fall back to direct diff
-            warn("No merge-base found, falling back to direct diff (may list too many files)")
-            diff_files_raw = git_output("diff", "--name-only", ref)
+            # Files the fork modified since the common ancestor
+            fork_changed_raw = git_output("diff", "--name-only", merge_base, ref)
+            fork_changed = [f for f in (fork_changed_raw or "").splitlines() if f.strip()]
 
-        if diff_files_raw:
-            all_differing = [f for f in diff_files_raw.splitlines() if f.strip()]
-        else:
-            all_differing = []
+            # Filter out exclusive paths (already pulled in Phase 1) and binaries
+            binary_exts = {".dll", ".exe", ".pdb", ".so", ".dylib", ".png", ".jpg",
+                           ".gif", ".ico", ".zip", ".gz", ".tar", ".bin", ".dat"}
 
-        # Filter out exclusive paths (already pulled in Phase 1)
-        def is_exclusive(filepath):
-            for ep in all_exclusive:
-                # ep can be "Sources/frenkeyLib/LootEx/" (dir) or a file
-                if ep.endswith("/"):
-                    if filepath.startswith(ep) or filepath.startswith(ep.rstrip("/")):
+            def should_skip(filepath):
+                # Skip exclusive paths
+                for ep in all_exclusive:
+                    if ep.endswith("/"):
+                        if filepath.startswith(ep) or filepath.startswith(ep.rstrip("/")):
+                            return True
+                    elif filepath == ep:
                         return True
-                elif filepath == ep:
+                # Skip binary files
+                if Path(filepath).suffix.lower() in binary_exts:
                     return True
-            return False
+                return False
 
-        detected_touchpoints = [f for f in all_differing if not is_exclusive(f)]
+            candidates = [f for f in fork_changed if not should_skip(f)]
 
-        # Merge explicit + detected, deduplicate
-        touchpoints = list(dict.fromkeys(explicit_touchpoints + detected_touchpoints))
-
-        if not touchpoints:
-            log("Phase 2: No touchpoint differences found")
-        else:
-            if detected_touchpoints:
-                log(f"  Auto-detected {len(detected_touchpoints)} touchpoint(s) outside exclusive paths:")
-                for tp in detected_touchpoints:
-                    log(f"    {tp}")
-            if explicit_touchpoints:
-                explicit_only = [t for t in explicit_touchpoints if t not in detected_touchpoints]
-                if explicit_only:
-                    log(f"  {len(explicit_only)} explicit touchpoint(s) from manifest (not in diff):")
-                    for tp in explicit_only:
-                        log(f"    {tp}")
-
-            # Check which touchpoints actually have differences
+            # Now check: does the fork actually have NEW content that upstream
+            # doesn't? We diff upstream->fork. If the fork only has OLDER code
+            # (upstream moved ahead), there's nothing to integrate.
             needs_work = []
-            for tp in touchpoints:
-                diff = git_output("diff", ref, "--", tp)
-                if diff is None or diff == "":
-                    log(f"  {tp}: already in sync")
-                else:
-                    log(f"  {tp}: differences detected")
-                    needs_work.append(tp)
+            for fp in candidates:
+                # Check if file exists in both refs
+                in_upstream = git_output("ls-tree", "--name-only", upstream_ref, "--", fp)
+                in_fork = git_output("ls-tree", "--name-only", ref, "--", fp)
+
+                if not in_fork or in_fork == "":
+                    # Fork deleted this file — nothing to integrate
+                    continue
+                if not in_upstream or in_upstream == "":
+                    # File only exists in fork, not upstream — it's fork-exclusive
+                    # content that wasn't listed in exclusive_paths. Skip it since
+                    # it's not a "shared" touchpoint.
+                    continue
+
+                # Both sides have the file. Check if they differ.
+                diff = git_output("diff", upstream_ref, ref, "--", fp)
+                if diff and diff != "":
+                    needs_work.append(fp)
 
             if not needs_work:
-                log("Phase 2: All touchpoints already in sync")
-
+                log("Phase 2: No touchpoints need reconciliation")
             else:
+                log(f"  {len(needs_work)} touchpoint(s) need reconciliation:")
+                for tp in needs_work:
+                    log(f"    {tp}")
+
                 file_list = " ".join(needs_work)
                 claude_succeeded = False
 
@@ -409,12 +405,14 @@ def main():
                 elif use_claude:
                     warn("Claude Code CLI not found.")
 
-                # If Claude didn't run or failed, always show diffs for manual review
+                # If Claude didn't run or failed, print diffs to stdout (captured, no pager)
                 if not claude_succeeded:
-                    log("Printing diffs for manual review:")
+                    log("Diffs for manual review:")
                     for tp in needs_work:
-                        print(f"\n--- {tp} ---")
-                        git("diff", ref, "--", tp)
+                        diff_text = git_output("diff", upstream_ref, ref, "--", tp)
+                        if diff_text:
+                            print(f"\n--- {tp} ---")
+                            print(diff_text)
                     warn(f"Manual reconciliation needed for: {file_list}")
 
         # -------------------------------------------------------------------
