@@ -553,7 +553,7 @@ class NPC_ModelStruct(Structure):
     
     @property
     def is_pet(self) -> bool:
-        return self.npc_flags == 0xD
+        return (self.npc_flags & 0xD) != 0
     
     @property
     def name_encoded_str(self) -> str | None:

@@ -42,7 +42,9 @@ class ItemDataStruct():
     dye: DyeInfoStruct
     value: int
     interaction: int
-    
+
+    @property
+    def is_identified(self) -> bool: ...
     def snapshot(self) -> "ItemDataStruct": ...
     
 # ---------------------------------------------------------------------
@@ -247,6 +249,7 @@ class AgentLiving:
     dagger_status : int            #0x1 = used lead attack, 0x2
     allegiance : int               #Constants::Allegiance; 0x1 = ally/non-attackable, 0x2 = neutral, 0x3 = enemy, 0x4 = spirit/pet, 0x5 = minion, 0x6 = npc/minipet
     weapon_type : int             #1=bow, 2=axe, 3=hammer, 4=daggers, 5=scythe, 6=spear, 7=sWORD, 10=wand, 12=staff, 14=staff
+    casting_anim_type : int       #From Skill+0x32. Set on cast start, cleared on cast end. Animation category for the active cast.
     skill : int                   #0 = not using a skill. Anything else is the Id of
     h01BA : int
     weapon_item_type : int
@@ -338,6 +341,7 @@ class AgentLivingStruct(AgentStruct):
     dagger_status : int            #0x1 = used lead attack, 0x2
     allegiance : int               #Constants::Allegiance; 0x1 = ally/non-attackable, 0x2 = neutral, 0x3 = enemy, 0x4 = spirit/pet, 0x5 = minion, 0x6 = npc/minipet
     weapon_type : int             #1=bow, 2=axe, 3=hammer, 4=daggers, 5=scythe, 6=spear, 7=sWORD, 10=wand, 12=staff, 14=staff
+    casting_anim_type : int       #From Skill+0x32. Set on cast start, cleared on cast end. Animation category for the active cast.
     skill : int                   #0 = not using a skill. Anything else is the Id of
     h01BA : int
     weapon_item_type : int

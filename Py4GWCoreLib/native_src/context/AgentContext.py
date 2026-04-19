@@ -65,7 +65,18 @@ class ItemDataStruct(Structure):
         ("value", c_uint32),             # 0x0B / actually 0x0C aligned
         ("interaction", c_uint32),       # 0x10
     ]
-    
+
+    @property
+    def is_identified(self) -> bool:
+        """True when the item is identified or not identifiable.
+
+        The game's authoritative "unidentified" indicator is the
+        IsNotAndCanBeIdentified bit (0x00800000). When set, the item is
+        unidentified; when clear, the item is identified (or not
+        identifiable at all, e.g. stackables, kits, keys).
+        """
+        return (self.interaction & 0x00800000) == 0
+
     def snapshot(self) -> ItemData:
         return ItemData(
             model_file_id=int(self.model_file_id),
@@ -615,6 +626,7 @@ class AgentLiving:
     dagger_status : int            #0x1 = used lead attack, 0x2
     allegiance : int               #Constants::Allegiance; 0x1 = ally/non-attackable, 0x2 = neutral, 0x3 = enemy, 0x4 = spirit/pet, 0x5 = minion, 0x6 = npc/minipet
     weapon_type : int             #1=bow, 2=axe, 3=hammer, 4=daggers, 5=scythe, 6=spear, 7=sWORD, 10=wand, 12=staff, 14=staff
+    casting_anim_type : int       #From Skill+0x32. Set on cast start, cleared on cast end. Animation category for the active cast.
     skill : int                   #0 = not using a skill. Anything else is the Id of
     h01BA : int
     weapon_item_type : int
@@ -708,7 +720,8 @@ class AgentLivingStruct(AgentStruct):
         ("h0194", c_uint8 * 32),
         ("dagger_status", c_uint8),            #0x1 = used lead attack, 0x2 = used offhand attack, 0x3 = used dual attack
         ("allegiance", c_uint8),               #Constants::Allegiance; 0x1 = ally/non-attackable, 0x2 = neutral, 0x3 = enemy, 0x4 = spirit/pet, 0x5 = minion, 0x6 = npc/minipet
-        ("weapon_type", c_uint16),             #1=bow, 2=axe, 3=hammer, 4=daggers, 5=scythe, 6=spear, 7=sWORD, 10=wand, 12=staff, 14=staff
+        ("weapon_type", c_uint8),              #1=bow, 2=axe, 3=hammer, 4=daggers, 5=scythe, 6=spear, 7=sWORD, 10=wand, 12=staff, 14=staff
+        ("casting_anim_type", c_uint8),        #From Skill+0x32. Set on cast start, cleared on cast end. Animation category for the active cast.
         ("skill", c_uint16),                   #0 = not using a skill. Anything else is the Id of that skill
         ("h01BA", c_uint16),
         ("weapon_item_type", c_uint8),
@@ -906,6 +919,7 @@ class AgentLivingStruct(AgentStruct):
             dagger_status=int(self.dagger_status),
             allegiance=int(self.allegiance),
             weapon_type=int(self.weapon_type),
+            casting_anim_type=int(self.casting_anim_type),
             skill=int(self.skill),
             h01BA=int(self.h01BA),
             weapon_item_type=int(self.weapon_item_type),
