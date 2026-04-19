@@ -215,11 +215,15 @@ class Equipment:
     shield:Optional[ItemData]
 
 class EquipmentStruct(Structure):
+    """Base equipment struct (NPCEquipment, 0x10C bytes).
+
+    PlayerEquipmentStruct extends this to 0x3F8 bytes with redraw/visibility flags.
+    """
     _pack_ = 1
     _fields_ = [
         ("vtable", c_void_p),               # 0x0000
-        ("h0004", c_uint32),                # 0x0004 Ptr PlayerModelFile?
-        ("h0008", c_uint32),                # 0x0008
+        ("h0004", c_uint32),                # 0x0004 always 2 ?
+        ("model_handle", c_void_p),         # 0x0008 Ptr PlayerModelFile?
         ("h000C", c_uint32),                # 0x000C
         ("left_hand_ptr", POINTER(ItemDataStruct)),   # 0x0010 Ptr Bow, Hammer, Focus, Daggers, Scythe
         ("right_hand_ptr", POINTER(ItemDataStruct)),  # 0x0014 Ptr Sword, Spear, Staff, Daggers, Axe, Zepter, Bundle
@@ -235,6 +239,9 @@ class EquipmentStruct(Structure):
 
         # ---- 0x00B4 .. 0x00D7 ----
         ("ids_union", EquipmentItemIDsUnionStruct),
+
+        # ---- 0x00D8 .. 0x010B: tail padding to reach full NPCEquipment size (0x10C) ----
+        ("_equipment_tail", c_uint8 * 0x34),
     ]
     
     # ---------- SAFE ACCESSORS ----------
@@ -267,7 +274,7 @@ class EquipmentStruct(Structure):
         return Equipment(
             vtable=int(self.vtable) if self.vtable else 0,
             h0004=int(self.h0004),
-            h0008=int(self.h0008),
+            h0008=int(self.model_handle) if self.model_handle else 0,
             h000C=int(self.h000C),
             h0018=int(self.h0018),
             left_hand_map=int(self.left_hand_map),
@@ -283,6 +290,42 @@ class EquipmentStruct(Structure):
             shield=self.shield.snapshot() if self.shield else None,
 
         )
+
+# ---------------------------------------------------------------------
+# ------------------ PlayerEquipment (extends Equipment) --------------
+# ---------------------------------------------------------------------
+# The game uses two equipment layouts backing the same Equipment** pointer:
+# NPCEquipment (0x10C) for NPCs, PlayerEquipment (0x3F8) for players. The
+# extra tail holds redraw/visibility flags used by the model renderer.
+# EquipmentStruct above is laid out as NPCEquipment. Cast the memory to
+# PlayerEquipmentStruct for a player's equipment to access the extra fields.
+
+class PlayerEquipmentStruct(EquipmentStruct):
+    _pack_ = 1
+    _fields_ = [
+        ("h010C", c_uint32),                # +0x010C  From constructor param_3
+        ("h0110", c_uint32 * 0xB2),         # +0x0110  Padding (178 u32 = 0x2C8 bytes)
+        ("equipment_flags", c_uint32),      # +0x03D8  Redraw flags (0xFFFFFFFF = needs draw, 0x00000000 = fully drawn)
+        ("h03DC", c_uint32),                # +0x03DC  Initialized to 0
+        ("visibility_flags", c_uint32),     # +0x03E0  Visibility flags (0xFFFFFFFF initial)
+        ("h03E4", c_uint32),                # +0x03E4  param_1 from constructor
+        ("h03E8", c_uint32 * 4),            # +0x03E8  Padding to reach 0x3F8
+    ]
+
+    @property
+    def pending_redraw(self) -> bool:
+        """True if any equipment slot is waiting for redraw."""
+        return self.equipment_flags != 0
+
+    @property
+    def pending_first_draw(self) -> bool:
+        """True if equipment still needs initial draw (all bits set)."""
+        return self.equipment_flags == 0xFFFFFFFF
+
+    @property
+    def is_fully_drawn(self) -> bool:
+        """True if all equipment slots are fully drawn (all bits cleared)."""
+        return self.equipment_flags == 0
 
 # ---------------------------------------------------------------------
 # ----------------------- TagInfo -------------------------------------
@@ -627,6 +670,7 @@ class AgentLiving:
     visible_effects: List[VisibleEffect]
     is_bleeding: bool
     is_conditioned: bool
+    is_used_corpse: bool
     is_crippled: bool
     is_dead: bool
     is_deep_wounded: bool
@@ -748,6 +792,10 @@ class AgentLivingStruct(AgentStruct):
     def is_conditioned(self) -> bool:
         """Return True if the agent is conditioned."""
         return (self.effects & 0x0002) != 0
+    @property
+    def is_used_corpse(self) -> bool:
+        """Return True if the corpse has already been exploited (minion/consume/etc)."""
+        return (self.effects & 0x0004) != 0
     @property
     def is_crippled(self) -> bool:
         """Return True if the agent is crippled."""
@@ -917,6 +965,7 @@ class AgentLivingStruct(AgentStruct):
             visible_effects= [ve.snapshot() for ve in self.visible_effects] if self.visible_effects else [],
             is_bleeding=self.is_bleeding,
             is_conditioned=self.is_conditioned,
+            is_used_corpse=self.is_used_corpse,
             is_crippled=self.is_crippled,
             is_dead=self.is_dead,
             is_deep_wounded=self.is_deep_wounded,

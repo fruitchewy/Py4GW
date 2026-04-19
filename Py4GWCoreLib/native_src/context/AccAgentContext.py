@@ -1,7 +1,7 @@
 import PyPointers
 from typing import Optional
 
-from ctypes import Structure, POINTER,c_uint32, c_wchar, c_uint8, cast, c_void_p
+from ctypes import Structure, POINTER,c_uint32, c_wchar, c_uint8, c_float, cast, c_void_p
 from ..internals.helpers import read_wstr, encoded_wstr_to_str
 from ..internals.types import Vec3f
 from ..internals.gw_array import GW_Array, GW_Array_Value_View, GW_Array_View
@@ -48,18 +48,35 @@ class AgentSummaryInfo(Structure):
 class AgentMovement(Structure):
     _pack_ = 1
     _fields_ = [
-        ("h0000", c_uint32 * 3),    # +0x0000
-        ("agent_id", c_uint32),     # +0x000C
-        ("h0010", c_uint32 * 3),    # +0x0010
-        ("agentDef", c_uint32),     # +0x001C  // GW_AGENTDEF_CHAR = 1
-        ("h0020", c_uint32 * 6),    # +0x0020
-        ("moving1", c_uint32),      # +0x0038  // tells if you are stuck even if your client doesn't know
-        ("h003C", c_uint32 * 2),    # +0x003C
-        ("moving2", c_uint32),      # +0x0044  // exactly same as Moving1
-        ("h0048", c_uint32 * 7),    # +0x0048
-        ("h0064", Vec3f),           # +0x0064
-        ("h0070", c_uint32),        # +0x0070
-        ("h0074", Vec3f),           # +0x0074
+        ("h0000", c_uint32 * 2),              # +0x0000
+        ("move_state", c_uint32),             # +0x0008  Movement phase (idle/moving/pathfinding transitions)
+        ("agent_id", c_uint32),               # +0x000C
+        ("h0010", c_uint32 * 3),              # +0x0010
+        ("agentDef", c_uint32),               # +0x001C  GW_AGENTDEF_CHAR = 1
+        ("h0020", c_uint32 * 6),              # +0x0020
+        ("moving1", c_uint32),                # +0x0038  tells if you are stuck even if your client doesn't know
+        ("h003C", c_uint32 * 2),              # +0x003C
+        ("moving2", c_uint32),                # +0x0044  exactly same as moving1
+        ("h0048", c_uint32 * 5),              # +0x0048
+        ("h005C", c_uint32),                  # +0x005C
+        ("speed_modifier", c_float),          # +0x0060  Movement speed multiplier. Increases sharply on aggro transition.
+        ("position", Vec3f),                  # +0x0064  (0, world_x, world_y)
+        ("h0070", c_uint32),                  # +0x0070
+        ("position2", Vec3f),                 # +0x0074  position copy
+        ("h0080", c_uint32 * 2),              # +0x0080
+        ("dest_x", c_float),                  # +0x0088  Movement destination X (inf = stopped)
+        ("dest_y", c_float),                  # +0x008C  Movement destination Y (inf = stopped)
+        ("h0090", c_uint32),                  # +0x0090
+        ("h0094", c_uint32),                  # +0x0094
+        ("movement_target_id", c_uint32),     # +0x0098  Agent ID of movement target (0 = none). Melee aggro only — casters may cast without setting this.
+        ("dest_x2", c_float),                 # +0x009C  Cached destination X
+        ("dest_y2", c_float),                 # +0x00A0  Cached destination Y
+        ("h00A4", c_uint32 * 3),              # +0x00A4
+        ("dir_offset_x", c_float),            # +0x00B0  Direction vector to destination
+        ("dir_offset_y", c_float),            # +0x00B4  Direction vector to destination
+        ("h00B8", c_uint32),                  # +0x00B8
+        ("heading_sin", c_float),             # +0x00BC  sin(movement heading)
+        ("heading_cos", c_float),             # +0x00C0  cos(movement heading)
     ]
 
 #region AgentContextStruct

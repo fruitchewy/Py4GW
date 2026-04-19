@@ -357,21 +357,27 @@ class PetInfoStruct(Structure):
     @property
     def pet_name_str(self) -> str | None: ...
 
+class CharAdjustmentStruct(Structure):
+    hue: int
+    saturation: int
+    lightness: int
+    scale: int                          # percent
+
 class NPC_ModelStruct(Structure):
     model_file_id: int
-    h0004: int
-    scale: int
-    sex: int
+    skin_file_id: int                   # +h0004
+    visual_adjustment: CharAdjustmentStruct  # +h0008 may be overridden
+    appearance: int                     # +h000C
     npc_flags: int
     primary: int
-    h0018: int
+    secondary: int                      # +h0018
     default_level: int
     padding1: int
     padding2: int
     name_enc_ptr: Optional[str]
-    model_files_ptr: Optional[int]     # pointer to uint32_t buffer
+    model_files_ptr: Optional[int]      # pointer to uint32_t buffer
     files_count: int
-    files_capacity: int  
+    files_capacity: int
     
     @property
     def is_valid(self) -> bool: ...

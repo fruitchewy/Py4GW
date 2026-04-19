@@ -131,9 +131,10 @@ class Equipment:
     shield:Optional[ItemData]
    
 class EquipmentStruct():
+    """Base equipment struct (NPCEquipment, 0x10C bytes). PlayerEquipmentStruct extends."""
     vtable : int
     h0004 : int
-    h0008 : int
+    model_handle : int            # +0x0008  Ptr PlayerModelFile?
     h000C : int
     left_hand_ptr : Optional[CPointer[ItemDataStruct]]
     right_hand_ptr : Optional[CPointer[ItemDataStruct]]
@@ -145,17 +146,30 @@ class EquipmentStruct():
     shield_map : int
     items_union : EquipmentItemsUnion
     ids_union : EquipmentItemIDsUnion
-    
+
     def snapshot(self) -> "Equipment": ...
 
-    @property 
+    @property
     def left_hand(self) -> Optional[ItemDataStruct]:...
-    
+
     @property
     def right_hand(self) -> Optional[ItemDataStruct]:...
-    
+
     @property
     def shield(self) -> Optional[ItemDataStruct]:...
+
+
+class PlayerEquipmentStruct(EquipmentStruct):
+    """Extended equipment layout for players (0x3F8 bytes). Adds redraw/visibility flags."""
+    equipment_flags: int          # +0x03D8  Redraw flags (0xFFFFFFFF = needs draw, 0x00000000 = fully drawn)
+    visibility_flags: int         # +0x03E0  Visibility flags (0xFFFFFFFF initial)
+
+    @property
+    def pending_redraw(self) -> bool: ...
+    @property
+    def pending_first_draw(self) -> bool: ...
+    @property
+    def is_fully_drawn(self) -> bool: ...
 
 # ---------------------------------------------------------------------
 # ----------------------- TagInfo -------------------------------------
@@ -259,6 +273,7 @@ class AgentLiving:
     visible_effects: List[VisibleEffectStruct]
     is_bleeding: bool
     is_conditioned: bool
+    is_used_corpse: bool
     is_crippled: bool
     is_dead: bool
     is_deep_wounded: bool
@@ -357,6 +372,8 @@ class AgentLivingStruct(AgentStruct):
     def is_bleeding(self) -> bool:...
     @property
     def is_conditioned(self) -> bool:...
+    @property
+    def is_used_corpse(self) -> bool:...
     @property
     def is_crippled(self) -> bool:...
     @property

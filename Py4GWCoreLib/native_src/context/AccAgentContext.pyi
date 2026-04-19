@@ -27,6 +27,7 @@ class AgentSummaryInfo():
    
 class AgentMovement():
     h0000: List[int]
+    move_state: int              # +0x0008  Movement phase (idle/moving/pathfinding transitions)
     agent_id: int
     h0010: List[int]
     agentDef: int
@@ -35,9 +36,25 @@ class AgentMovement():
     h003C: List[int]
     moving2: int
     h0048: List[int]
-    h0064: Vec3f
+    h005C: int
+    speed_modifier: float        # +0x0060  Movement speed multiplier. Increases sharply on aggro transition.
+    position: Vec3f              # +0x0064  (0, world_x, world_y)
     h0070: int
-    h0074: Vec3f
+    position2: Vec3f             # +0x0074  position copy
+    h0080: List[int]
+    dest_x: float                # +0x0088  Movement destination X (inf = stopped)
+    dest_y: float                # +0x008C  Movement destination Y (inf = stopped)
+    h0090: int
+    h0094: int
+    movement_target_id: int      # +0x0098  Melee aggro target (0 = none). Casters may cast without setting this.
+    dest_x2: float               # +0x009C  Cached destination X
+    dest_y2: float               # +0x00A0  Cached destination Y
+    h00A4: List[int]
+    dir_offset_x: float          # +0x00B0  Direction vector to destination
+    dir_offset_y: float          # +0x00B4
+    h00B8: int
+    heading_sin: float           # +0x00BC  sin(movement heading)
+    heading_cos: float           # +0x00C0  cos(movement heading)
     
 class AccAgentContextStruct():
     h0000_array: GW_Array

@@ -74,8 +74,8 @@ class ObserverMatch(Structure):
             return encoded_wstr_to_str(encoded)
         return None
    
-#region  ProgressBar
-class ProgressBar(Structure):
+#region  ProgressBarContext
+class ProgressBarContext(Structure):
     _pack_ = 1
     _fields_ = [
         ("pips", c_uint32),                 # +0x0000
@@ -121,7 +121,7 @@ class CharContextStruct(Structure):
         ("player_flags", c_uint32),         # +0x02A0
         ("player_number", c_uint32),        # +0x02A4
         ("h02A8", c_uint32 * 40),           # +0x02A8
-        ("progress_bar_ptr", POINTER(ProgressBar)),     # +0x0348 ProgressBar*
+        ("progress_bar_ptr", POINTER(ProgressBarContext)),     # +0x0348 ProgressBarContext*
         ("h034C", c_uint32 * 27),           # +0x034C
         ("player_email_ptr", c_wchar * 0x40),   # +0x03B8 wchar_t[64]
     ]
@@ -175,8 +175,8 @@ class CharContextStruct(Structure):
             return None
         return [ptr.contents for ptr in ptrs]
     @property
-    def progress_bar(self) -> ProgressBar | None:
-        """Get the ProgressBar instance."""
+    def progress_bar(self) -> ProgressBarContext | None:
+        """Get the ProgressBarContext instance."""
         if self.progress_bar_ptr:
             return self.progress_bar_ptr.contents
         return None

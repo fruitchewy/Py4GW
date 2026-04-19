@@ -4,7 +4,7 @@ import math
 
 from ctypes import (
     Structure, POINTER,
-    c_uint32, c_float, c_void_p, c_wchar, c_uint8,c_uint16,
+    c_uint32, c_float, c_void_p, c_wchar, c_uint8, c_int8, c_uint16,
     cast
 )
 from ..internals.helpers import read_wstr, encoded_wstr_to_str
@@ -514,43 +514,52 @@ class PetInfoStruct(Structure):
         return encoded_wstr_to_str(read_wstr(self.pet_name_ptr))
     
     
+class CharAdjustmentStruct(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("hue", c_int8),
+        ("saturation", c_int8),
+        ("lightness", c_int8),
+        ("scale", c_int8),  # percent
+    ]
+
 class NPC_ModelStruct(Structure):
     _pack_ = 1
     _fields_ = [
-        ("model_file_id", c_uint32),    # +h0000
-        ("h0004", c_uint32),            # +h0004
-        ("scale", c_uint32),            # +h0008 // I think, 2 highest order bytes are percent of size, so 0x64000000 is 100
-        ("sex", c_uint32),              # +h000C
-        ("npc_flags", c_uint32),        # +h0010
-        ("primary", c_uint32),          # +h0014
-        ("h0018", c_uint32),            # +h0018
-        ("default_level", c_uint8),     # +h001C
-        ("padding1", c_uint8),          # +h001D
-        ("padding2", c_uint16),         # +h001E
-        ("name_enc_ptr", POINTER(c_wchar)), # +h0020
-        ("model_files_ptr", c_void_p),   # data* +h0024 // ModelFile*
-        ("files_count", c_uint32),      # +h0028 // length of ModelFile
-        ("files_capacity", c_uint32),   # +h002C // capacity of ModelFile
-    ]  
+        ("model_file_id", c_uint32),             # +h0000
+        ("skin_file_id", c_uint32),              # +h0004
+        ("visual_adjustment", CharAdjustmentStruct),  # +h0008  hue/saturation/lightness/scale (may be overridden)
+        ("appearance", c_uint32),                # +h000C
+        ("npc_flags", c_uint32),                 # +h0010
+        ("primary", c_uint32),                   # +h0014
+        ("secondary", c_uint32),                 # +h0018
+        ("default_level", c_uint8),              # +h001C
+        ("padding1", c_uint8),                   # +h001D
+        ("padding2", c_uint16),                  # +h001E
+        ("name_enc_ptr", POINTER(c_wchar)),      # +h0020
+        ("model_files_ptr", c_void_p),           # +h0024 ModelFile*
+        ("files_count", c_uint32),               # +h0028 length of ModelFile
+        ("files_capacity", c_uint32),            # +h002C capacity of ModelFile
+    ]
     @property
     def is_valid(self) -> bool:
         return self.model_file_id != 0
     @property
     def is_henchman(self) -> bool:
         return (self.npc_flags & 0x10) != 0
-    
+
     @property
     def is_hero(self) -> bool:
         return (self.npc_flags & 0x20) != 0
-    
+
     @property
     def is_spirit(self) -> bool:
         return (self.npc_flags & 0x4000) != 0
-    
+
     @property
     def is_minion(self) -> bool:
         return (self.npc_flags & 0x100) != 0
-    
+
     @property
     def is_pet(self) -> bool:
         return self.npc_flags == 0xD

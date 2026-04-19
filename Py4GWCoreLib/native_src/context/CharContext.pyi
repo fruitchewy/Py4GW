@@ -42,7 +42,7 @@ class ObserverMatch():
     def team_name2_str(self) -> str | None:...
    
     
-class ProgressBar():
+class ProgressBarContext():
     pips: int
     color: List[int]
     background: List[int]
@@ -82,7 +82,7 @@ class CharContextStruct():
     player_flags: int
     player_number: int
     h02A8: List[int]
-    progress_bar_ptr: CPointer[ProgressBar]
+    progress_bar_ptr: CPointer[ProgressBarContext]
     h034C: List[int]
     player_email_ptr: str
 
@@ -101,7 +101,7 @@ class CharContextStruct():
     @property
     def observer_matches(self) -> List[ObserverMatch] | None:...
     @property
-    def progress_bar(self) -> ProgressBar | None:...
+    def progress_bar(self) -> ProgressBarContext | None:...
     @property
     def player_name_encoded_str(self) -> str | None:...
     @property
